@@ -1,0 +1,13 @@
+# ESP-IDF / PlatformIO build output and generated config
+.pio/
+build/
+managed_components/
+sdkconfig
+sdkconfig.*
+!sdkconfig.defaults
+
+# Local tooling
+__pycache__/
+*.pyc
+.vscode/
+.idea/

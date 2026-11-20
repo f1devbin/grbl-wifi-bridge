@@ -1,0 +1,17 @@
+{
+  "name": "GRBL Wi-Fi Bridge",
+  "version": "1.4.0",
+  "new_install_prompt_erase": true,
+  "new_install_improv_wait_time": 20,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "firmware/grbl-wifi-bridge-esp32s3-v1.4.0-factory.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRBL Wi-Fi Bridge: Wireless LightBurn for Laser Engravers and CNC</title>
+<meta name="description" content="Control any USB GRBL laser engraver or CNC router over Wi-Fi from LightBurn or UGS. Flash an ESP32-S3 from your browser, plug it into the machine&#x27;s USB port. Free and open source.">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="theme-color" content="#0a0d12">
+<link rel="canonical" href="https://f1devbin.github.io/grbl-wifi-bridge/">
+<link rel="alternate" hreflang="en" href="https://f1devbin.github.io/grbl-wifi-bridge/">
+<link rel="alternate" hreflang="ru" href="https://f1devbin.github.io/grbl-wifi-bridge/ru/">
+<link rel="alternate" hreflang="x-default" href="https://f1devbin.github.io/grbl-wifi-bridge/">
+<link rel="icon" type="image/png" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="GRBL Wi-Fi Bridge">
+<meta property="og:title" content="GRBL Wi-Fi Bridge: Wireless LightBurn for Laser Engravers and CNC">
+<meta property="og:description" content="Control any USB GRBL laser engraver or CNC router over Wi-Fi from LightBurn or UGS. Flash an ESP32-S3 from your browser, plug it into the machine&#x27;s USB port. Free and open source.">
+<meta property="og:url" content="https://f1devbin.github.io/grbl-wifi-bridge/">
+<meta property="og:image" content="https://f1devbin.github.io/grbl-wifi-bridge/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">[{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "GRBL Wi-Fi Bridge", "description": "Control any USB GRBL laser engraver or CNC router over Wi-Fi from LightBurn or UGS. Flash an ESP32-S3 from your browser, plug it into the machine's USB port. Free and open source.", "url": "https://f1devbin.github.io/grbl-wifi-bridge/", "inLanguage": "en", "applicationCategory": "UtilitiesApplication", "operatingSystem": "ESP32-S3 firmware", "softwareVersion": "1.4.0", "downloadUrl": "https://f1devbin.github.io/grbl-wifi-bridge/firmware/grbl-wifi-bridge-esp32s3-v1.4.0-factory.bin", "codeRepository": "https://github.com/f1devbin/grbl-wifi-bridge", "license": "https://opensource.org/licenses/MIT", "isAccessibleForFree": true, "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "author": {"@type": "Person", "name": "f1devbin", "url": "https://f1devbin.github.io/"}, "image": "https://f1devbin.github.io/grbl-wifi-bridge/og.png", "keywords": "GRBL WiFi, LightBurn WiFi, laser engraver WiFi, CNC WiFi, ESP32-S3 USB host, wireless GRBL, GRBL telnet, web flasher"}, {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Does it work with LightBurn over Wi-Fi?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Add a GRBL device with the Ethernet/TCP connection type, the bridge address and port 23. LightBurn then streams jobs over Wi-Fi exactly as over USB."}}, {"@type": "Question", "name": "Which machines are supported?", "acceptedAnswer": {"@type": "Answer", "text": "Any controller that speaks GRBL or grblHAL through a USB serial chip (CH340, CP210x, FTDI or CDC-ACM): most hobby diode laser engravers, 3018-style CNC routers and GRBL pen plotters. Controllers that already have Wi-Fi, such as FluidNC, do not need it."}}, {"@type": "Question", "name": "Do I have to open or modify the machine?", "acceptedAnswer": {"@type": "Answer", "text": "No. The bridge plugs into the machine's existing USB port. The only soldering may be a jumper on the ESP32-S3 board that powers its USB port."}}, {"@type": "Question", "name": "Why ESP32-S3 and not a regular ESP32?", "acceptedAnswer": {"@type": "Answer", "text": "The bridge acts as a USB host for the machine's USB chip. The classic ESP32, ESP32-C3 and ESP32-C6 have no USB host; the ESP32-S3 does."}}, {"@type": "Question", "name": "What happens if Wi-Fi drops during a job?", "acceptedAnswer": {"@type": "Answer", "text": "When the connection to the sender breaks while GRBL is running, the bridge sends feed hold and a GRBL reset, which stops motion and switches the laser or spindle off. The job has to be restarted."}}, {"@type": "Question", "name": "Is it safe to use on my network?", "acceptedAnswer": {"@type": "Answer", "text": "The web panel has no login, so anyone on your local network can open it. Use the bridge on a trusted home or workshop network and never expose it to the internet."}}, {"@type": "Question", "name": "How do I update the firmware?", "acceptedAnswer": {"@type": "Answer", "text": "Upload the update file in the web panel, or flash the latest version from this page again."}}]}]</script>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<style>:root{--bg:#0a0d12;--card:#151b23;--card2:#1b232d;--line:#33404f;--acc:#ffd400;--acc2:#ffb800;--ok:#3ddc84;
+--bad:#ff5a5a;--info:#5cc8ff;--r:18px;--shadow:0 14px 36px rgba(0,0,0,.5),0 2px 6px rgba(0,0,0,.35)}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;color:#fff;font:19px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,sans-serif;
+background:radial-gradient(1200px 600px at 10% -10%,rgba(255,212,0,.13),transparent 60%),
+radial-gradient(900px 600px at 100% 0%,rgba(92,200,255,.12),transparent 55%),var(--bg);background-attachment:fixed}
+a{color:var(--acc);text-underline-offset:3px}
+a:hover{color:#fff}
+.skip{position:absolute;left:-999px;top:8px;background:var(--acc);color:#111;padding:8px 14px;border-radius:8px;z-index:20}
+.skip:focus{left:8px}
+.ic{width:26px;height:26px;flex:none;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.wrap{max-width:1120px;margin:0 auto;padding:0 18px}
+header{position:sticky;top:0;z-index:10;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+background:rgba(10,13,18,.8);border-bottom:1px solid var(--line)}
+.bar{display:flex;align-items:center;gap:14px;padding:12px 0}
+.brand{display:flex;align-items:center;gap:12px;margin-right:auto;color:#fff;text-decoration:none;font-weight:800;font-size:21px}
+.mark{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;color:#111;
+background:linear-gradient(135deg,var(--acc),var(--acc2));box-shadow:0 6px 18px rgba(255,200,0,.35)}
+.lang,.gh{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:12px;border:1px solid var(--line);
+background:var(--card2);color:#fff;font-weight:700;text-decoration:none;box-shadow:var(--shadow);transition:border-color .2s,transform .2s}
+.lang:hover,.gh:hover{border-color:#fff;transform:translateY(-1px);color:#fff}
+.hero{padding:56px 0 28px;display:grid;gap:36px;align-items:center}
+@media(min-width:960px){.hero{grid-template-columns:1.15fr .85fr}}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:999px;font-weight:800;font-size:16px;
+color:var(--acc);background:rgba(255,212,0,.1);border:1px solid rgba(255,212,0,.45)}
+h1{font-size:clamp(34px,5vw,56px);line-height:1.08;margin:18px 0;letter-spacing:-.5px}
+h1 em{font-style:normal;background:linear-gradient(90deg,var(--acc),#ffe98a);-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{font-size:21px;margin:0}
+.card{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
+padding:26px;box-shadow:var(--shadow),inset 0 1px 0 rgba(255,255,255,.05)}
+.install h2{margin-top:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:12px;width:100%;min-height:64px;padding:14px 24px;
+border:0;border-radius:14px;font:inherit;font-size:22px;font-weight:900;color:#111;cursor:pointer;
+background:linear-gradient(180deg,#ffe14d,var(--acc) 55%,var(--acc2));
+box-shadow:0 10px 26px rgba(255,200,0,.35),inset 0 1px 0 rgba(255,255,255,.55);transition:transform .15s,box-shadow .2s,filter .2s;
+animation:glow 2.6s ease-in-out infinite}
+.btn:hover{transform:translateY(-2px);filter:brightness(1.06)}
+.btn:active{transform:none}
+.btn:focus-visible{outline:3px solid #fff;outline-offset:3px}
+.note{margin:16px 0 0;font-size:17px}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:15px;font-weight:700;
+border:1px solid var(--line);background:rgba(0,0,0,.3)}
+.warn{display:block;padding:14px 16px;border-radius:12px;background:rgba(255,90,90,.12);border:1px solid var(--bad);font-weight:700}
+section{padding:30px 0}
+h2{font-size:clamp(26px,3.4vw,34px);margin:0 0 20px;line-height:1.2}
+h3{font-size:21px;margin:0 0 6px;color:var(--acc)}
+.grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.item{transition:transform .2s,border-color .2s}
+.item:hover{transform:translateY(-3px);border-color:#5a6a7c}
+.item p{margin:0}
+.num{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-weight:900;font-size:20px;color:#111;
+background:linear-gradient(135deg,var(--acc),var(--acc2));box-shadow:0 6px 16px rgba(255,200,0,.3);margin-bottom:14px}
+.icon{width:48px;height:48px;border-radius:14px;display:grid;place-items:center;margin-bottom:14px;color:var(--acc);
+background:rgba(255,212,0,.1);border:1px solid rgba(255,212,0,.35)}
+pre{margin:12px 0 0;padding:14px 16px;border-radius:12px;background:#05070a;border:1px solid var(--line);overflow:auto;
+font:16px/1.5 ui-monospace,"SFMono-Regular",Consolas,monospace;color:#fff}
+ul.list{margin:0;padding:0;list-style:none;display:grid;gap:12px}
+ul.list li{position:relative;padding:14px 16px 14px 50px;border-radius:14px;background:rgba(0,0,0,.28);border:1px solid var(--line)}
+ul.list li::before{content:"";position:absolute;left:16px;top:18px;width:20px;height:20px;border-radius:50%;
+background:var(--ok) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6L9 17l-5-5'/%3E%3C/svg%3E") center/13px no-repeat}
+details{border-radius:14px;background:rgba(0,0,0,.28);border:1px solid var(--line);margin-bottom:12px;transition:border-color .2s}
+details[open]{border-color:var(--acc)}
+summary{cursor:pointer;padding:16px 20px;font-weight:800;font-size:20px;list-style:none;display:flex;align-items:center;gap:12px}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"+";margin-left:auto;font-size:28px;line-height:1;color:var(--acc);transition:transform .25s}
+details[open] summary::after{transform:rotate(45deg)}
+details p{margin:0;padding:0 20px 18px}
+footer{border-top:1px solid var(--line);margin-top:30px;padding:26px 0 40px;font-weight:600}
+footer .wrap{display:flex;flex-wrap:wrap;gap:16px 28px;align-items:center}
+.reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s cubic-bezier(.2,.7,.2,1)}
+.reveal.in{opacity:1;transform:none}
+@keyframes glow{0%,100%{box-shadow:0 10px 26px rgba(255,200,0,.3),inset 0 1px 0 rgba(255,255,255,.55)}
+50%{box-shadow:0 10px 40px rgba(255,200,0,.6),inset 0 1px 0 rgba(255,255,255,.55)}}
+@keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+.hero>*{animation:rise .7s cubic-bezier(.2,.7,.2,1) both}.hero>*:nth-child(2){animation-delay:.12s}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.reveal{opacity:1;transform:none}html{scroll-behavior:auto}}
+@media(max-width:560px){body{font-size:18px}.brand span{display:none}.gh span{display:none}.card{padding:20px}}</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header><div class="wrap bar">
+<a class="brand" href="https://f1devbin.github.io/grbl-wifi-bridge/"><span class="mark"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></span><span>GRBL Wi-Fi Bridge</span></a>
+<a class="lang" href="https://f1devbin.github.io/grbl-wifi-bridge/ru/" hreflang="ru" lang="ru"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>Русский</a>
+<a class="gh" href="https://github.com/f1devbin/grbl-wifi-bridge"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg><span>GitHub</span></a>
+</div></header>
+<main id="main" class="wrap">
+<div class="hero">
+<div>
+<span class="eyebrow"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>Wireless GRBL for laser engravers and CNC</span>
+<h1>Control your GRBL laser engraver or CNC over <em>Wi-Fi</em></h1>
+<p class="lead">GRBL Wi-Fi Bridge turns an ESP32-S3 board into a Wi-Fi adapter for any GRBL machine with a USB port. Plug it in where the computer used to be and connect from <b>LightBurn</b>, <b>Universal Gcode Sender</b> or any sender with a TCP connection. Nothing to open, solder or reflash on the machine.</p>
+</div>
+<div class="card install">
+<esp-web-install-button manifest="manifest.json">
+<button slot="activate" class="btn"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v14M8 6l4-4 4 4M6 12v2a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2M12 16v4"/><circle cx="12" cy="21" r="1"/></svg>Install firmware</button>
+<span slot="unsupported" class="warn">Your browser cannot access USB ports. Open this page in Chrome or Edge on a computer.</span>
+<span slot="not-allowed" class="warn">USB access needs a secure page. Open the https:// address of this page.</span>
+</esp-web-install-button>
+<p class="note">Connect the ESP32-S3 to this computer through its USB-UART port, press the button and choose the port. After flashing, enter your Wi-Fi network: the page shows a link to the bridge when it is online.</p>
+<div class="meta"><span class="chip">Chrome or Edge on a computer</span><span class="chip">Firmware 1.4.0 · ESP32-S3 · erases the board&#x27;s flash</span></div>
+<p class="note"><a href="firmware/grbl-wifi-bridge-esp32s3-v1.4.0-ota.bin" download>Download the update file for the web panel</a></p>
+</div>
+</div>
+<section><h2>How it works</h2><div class="grid"><div class="card item reveal"><div class="num">1</div><h3>Flash</h3><p>Install the firmware from this page and pick your Wi-Fi network. No toolchain, no drivers.</p></div><div class="card item reveal"><div class="num">2</div><h3>Plug in</h3><p>Power the ESP32-S3 from a USB adapter and connect the machine to its native USB port.</p></div><div class="card item reveal"><div class="num">3</div><h3>Connect</h3><p>Add the bridge in LightBurn or UGS as a TCP device on port 23 and send jobs as usual.</p></div></div></section>
+<section><h2>Features</h2><div class="grid"><div class="card item reveal"><div class="icon"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v14M8 6l4-4 4 4M6 12v2a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2M12 16v4"/><circle cx="12" cy="21" r="1"/></svg></div><h3>USB host</h3><p>Works with the machine&#x27;s own USB chip: CH340/CH341, CP210x, FTDI and CDC-ACM devices.</p></div><div class="card item reveal"><div class="icon"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg></div><h3>Transparent TCP</h3><p>Port 23 passes bytes unchanged: streaming, real-time commands and $ settings work as over a cable.</p></div><div class="card item reveal"><div class="icon"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h3"/></svg></div><h3>Web panel</h3><p>Status, big STOP button, pause and resume, GRBL console, settings and updates in any browser, on a phone too.</p></div><div class="card item reveal"><div class="icon"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.86 2h8.28L22 7.86v8.28L16.14 22H7.86L2 16.14V7.86z"/><path d="M15 9l-6 6M9 9l6 6"/></svg></div><h3>Emergency stop</h3><p>If the sender disconnects during a job, the bridge sends feed hold and a GRBL reset: motion stops, laser and spindle switch off.</p></div><div class="card item reveal"><div class="icon"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h.01M8.5 16.4a5 5 0 0 1 7 0M5 12.9a10 10 0 0 1 14 0"/></svg></div><h3>Easy Wi-Fi setup</h3><p>From this page, from the setup access point or from the web panel. mDNS name grbl-bridge.local.</p></div><div class="card item reveal"><div class="icon"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M23 4v6h-6M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></div><h3>Safe updates</h3><p>Over-the-air updates with automatic rollback if a new image does not start.</p></div></div></section>
+<section><h2>Connect your software</h2><div class="grid"><div class="card item reveal"><h3>LightBurn</h3><p>Devices → Create Manually → GRBL → Ethernet/TCP → bridge address, port 23.</p></div><div class="card item reveal"><h3>Universal Gcode Sender</h3><p>Tools → Options → Sender Options → Connection driver: TCP, then connect to the bridge address, port 23.</p></div><div class="card item reveal"><h3>Serial-only programs</h3><p>Create a virtual serial port on Linux or macOS:</p><pre>socat pty,link=$HOME/ttyGRBL,raw,echo=0 \
+  tcp:grbl-bridge.local:23</pre></div></div></section>
+<section><h2>What you need</h2><ul class="list reveal"><li>An ESP32-S3 board with native USB OTG on GPIO19/GPIO20 and at least 8 MB of flash. Boards in the ESP32-S3-DevKitC-1 style with two USB-C ports are the easiest.</li><li>5 V on the native USB port so the machine&#x27;s USB chip is powered. On many dual-USB-C boards this needs a solder jumper (often marked USB-OTG). Check first that the machine does not drive 5 V on its own USB port.</li><li>A USB power adapter for the ESP32-S3.</li><li>Any machine running GRBL or grblHAL with a USB serial port: diode laser engravers, 3018 CNC routers, pen plotters.</li></ul></section>
+<section><h2>FAQ</h2><details class="reveal"><summary>Does it work with LightBurn over Wi-Fi?</summary><p>Yes. Add a GRBL device with the Ethernet/TCP connection type, the bridge address and port 23. LightBurn then streams jobs over Wi-Fi exactly as over USB.</p></details><details class="reveal"><summary>Which machines are supported?</summary><p>Any controller that speaks GRBL or grblHAL through a USB serial chip (CH340, CP210x, FTDI or CDC-ACM): most hobby diode laser engravers, 3018-style CNC routers and GRBL pen plotters. Controllers that already have Wi-Fi, such as FluidNC, do not need it.</p></details><details class="reveal"><summary>Do I have to open or modify the machine?</summary><p>No. The bridge plugs into the machine&#x27;s existing USB port. The only soldering may be a jumper on the ESP32-S3 board that powers its USB port.</p></details><details class="reveal"><summary>Why ESP32-S3 and not a regular ESP32?</summary><p>The bridge acts as a USB host for the machine&#x27;s USB chip. The classic ESP32, ESP32-C3 and ESP32-C6 have no USB host; the ESP32-S3 does.</p></details><details class="reveal"><summary>What happens if Wi-Fi drops during a job?</summary><p>When the connection to the sender breaks while GRBL is running, the bridge sends feed hold and a GRBL reset, which stops motion and switches the laser or spindle off. The job has to be restarted.</p></details><details class="reveal"><summary>Is it safe to use on my network?</summary><p>The web panel has no login, so anyone on your local network can open it. Use the bridge on a trusted home or workshop network and never expose it to the internet.</p></details><details class="reveal"><summary>How do I update the firmware?</summary><p>Upload the update file in the web panel, or flash the latest version from this page again.</p></details></section>
+</main>
+<footer><div class="wrap">
+<a href="https://github.com/f1devbin/grbl-wifi-bridge">Source code on GitHub</a>
+<a href="https://github.com/f1devbin/grbl-wifi-bridge/blob/main/LICENSE">MIT license</a>
+<span>Made by <a href="https://f1devbin.github.io/">f1devbin</a></span>
+</div></footer>
+<script>
+const io='IntersectionObserver' in window?new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.12}):null;
+document.querySelectorAll('.reveal').forEach(el=>io?io.observe(el):el.classList.add('in'));
+</script>
+</body>
+</html>
