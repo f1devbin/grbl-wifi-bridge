@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini', 'dependencies.lock') }}
+
+      - name: Install tools
+        run: pip install platformio "esptool>=5"
+
+      - name: Build firmware
+        run: pio run
+
+      - name: Package images
+        run: |
+          set -euo pipefail
+          B=.pio/build/esp32s3
+          VER="${GITHUB_REF_NAME#v}"
+          mkdir -p out
+          esptool --chip esp32s3 merge-bin -o "out/grbl-wifi-bridge-esp32s3-v${VER}-factory.bin" \
+            --flash-size 8MB \
+            0x0 "$B/bootloader.bin" \
+            0x8000 "$B/partitions.bin" \
+            0xf000 "$B/ota_data_initial.bin" \
+            0x20000 "$B/firmware.bin"
+          cp "$B/firmware.bin" "out/grbl-wifi-bridge-esp32s3-v${VER}-ota.bin"
+          ls -l out
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME#v}"
+          cat > NOTES.md <<'EOF'
+          Wireless GRBL for laser engravers and CNC machines. This release turns an ESP32-S3 into a USB host bridge that exposes any GRBL machine over Wi-Fi to LightBurn, UGS or a plain TCP connection.
+
+          ## What's new
+
+          - **Live GRBL state:** while no sender is connected the bridge asks GRBL for its status every 2 s, so the web panel and the status LED show `Idle`, `Alarm` or `Run` before you open a program.
+          - **Safety around restarts:** the bridge refuses to restart, change Wi-Fi, the TCP port or the baud rate while GRBL reports `Run`, `Jog` or `Hold`, and refuses port or baud changes while a sender is connected. The panel disables those controls during a job and explains why.
+          - **Cleaner stop state:** the emergency-stop flag is cleared once GRBL is back in `Idle`, so the red LED and the Alarm status do not stay on after a completed stop.
+          - **Clearer messages:** a refused action during a job now says "The machine is running. Stop the job first." instead of the firmware-update wording.
+
+          ## Files
+
+          - `grbl-wifi-bridge-esp32s3-vVER-factory.bin` — full factory image for the [browser flasher](https://f1devbin.github.io/grbl-wifi-bridge/) (flashes at offset 0x0 and erases the board).
+          - `grbl-wifi-bridge-esp32s3-vVER-ota.bin` — upload it in the web panel under Firmware, or POST it to `/api/update`.
+
+          Requires an ESP32-S3 board with native USB OTG and at least 8 MB of flash. Read the [README](https://github.com/f1devbin/grbl-wifi-bridge#readme) before connecting the machine. Never leave a running laser unattended.
+          EOF
+          sed -i "s/vVER/v${VER}/g" NOTES.md
+          gh release create "$GITHUB_REF_NAME" out/*.bin \
+            --verify-tag \
+            --title "GRBL Wi-Fi Bridge ${VER}" \
+            --notes-file NOTES.md
