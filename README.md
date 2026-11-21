@@ -15,6 +15,7 @@ GRBL Wi-Fi Bridge turns an ESP32-S3 board into a **Wi-Fi adapter for any GRBL ma
 - **USB host on the ESP32-S3**: talks to the machine's USB serial chip directly. Drivers for CH340/CH341, CP210x, FTDI and any CDC-ACM device (CH343, native USB controllers).
 - **Raw TCP bridge on port 23**: bytes pass through unchanged, so G-code streaming, real-time commands (`?`, `!`, `~`, `Ctrl-X`) and GRBL settings work exactly as over a USB cable.
 - **Web control panel** at `http://grbl-bridge.local/`: status, big STOP button, pause and resume, GRBL console with quick commands (`$I`, `$$`, `$X`, `$H`), settings, Wi-Fi, firmware update. English and Russian, adaptive layout for phones, high-contrast large text.
+- **Live GRBL state**: when no sender is connected the bridge asks GRBL for its status every 2 s, so the panel and the LED show Idle, Alarm or Run before you open a program.
 - **Safety**: if the connection to the sender drops during a job (Wi-Fi lost, laptop asleep, program crashed), the bridge sends feed hold and a GRBL reset, which stops motion and switches the laser or spindle off.
 - **Wi-Fi setup three ways**: from the web flasher (Improv), from the setup access point `GRBL-Bridge-setup`, or from the web panel.
 - **Over-the-air updates** with automatic rollback if a new image fails to start.
@@ -64,6 +65,7 @@ On some boards the LED only works after closing a solder jumper marked `RGB`.
 
 - The emergency stop triggers when the TCP sender disconnects while GRBL reports `Run`, `Jog` or `Hold`, or G-code was sent during the last 10 s. Broken connections are detected by TCP keepalive in about 6 s. After the reset GRBL loses its position, so the job has to be restarted. The option can be turned off in the panel.
 - Wi-Fi is less reliable than a cable. For laser jobs prefer dynamic power (`M4`), which turns the beam off when motion stops, and never leave a running laser or CNC unattended.
+- The bridge refuses to restart, change Wi-Fi or change the TCP port or baud rate while GRBL reports `Run`, `Jog` or `Hold`, and refuses a firmware update while a sender is connected or G-code was sent during the last 10 s. Press STOP first: restarting the bridge mid-job would leave the machine running without a sender.
 - The web panel has no login: anyone on your local network can open it. Keep the bridge on a trusted network.
 
 ## Will it work with my machine?

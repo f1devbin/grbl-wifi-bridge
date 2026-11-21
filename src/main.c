@@ -29,7 +29,7 @@
 #include "usb/vcp_cp210x.h"
 #include "usb/vcp_ftdi.h"
 
-#define FW_VERSION "1.4.0"
+#define FW_VERSION "1.5.0"
 #define FW_NAME "GRBL Wi-Fi Bridge"
 #define HOSTNAME "grbl-bridge"
 #define AP_SSID "GRBL-Bridge-setup"
@@ -44,6 +44,7 @@
 #define DEFAULT_BAUD 115200
 #define DEFAULT_PORT 23
 #define STREAMING_WINDOW_US (10LL * 1000000)
+#define STATUS_POLL_US (2LL * 1000000)  // '?' rate while no sender is connected
 #define WIFI_TX_POWER_QDBM 60  // 15 dBm: avoids brownout resets on weak USB power, plenty for a home network
 
 #define EV_USB_NEW BIT0
@@ -84,6 +85,7 @@ static volatile int g_client = -1;
 static char g_client_ip[16] = "-";
 static volatile uint32_t g_tx_bytes, g_rx_bytes;
 static volatile int64_t g_last_gcode_us = -STREAMING_WINDOW_US;
+static volatile int64_t g_last_poll_us;
 static volatile bool g_safety_tripped;
 static volatile bool g_show_status_once;
 
@@ -144,6 +146,8 @@ static void parse_rx(const uint8_t *data, size_t len) {
       for (const char *p = line + 1; *p && *p != '|' && *p != '>' && *p != ':' && k < sizeof(st) - 1; p++) st[k++] = *p;
       st[k] = '\0';
       set_state(st);
+      // A reset after an emergency stop ends with Idle; the panel no longer shows the stop as active.
+      if (g_safety_tripped && strcmp(st, "Idle") == 0) g_safety_tripped = false;
       if (g_show_status_once) {
         g_show_status_once = false;
         log_append(line, n);
@@ -359,11 +363,14 @@ static bool sock_is_ap(int fd) {
   return false;
 }
 
-static bool machine_busy(void) {
+static bool grbl_running(void) {
   char st[16];
   get_state(st, sizeof(st));
-  const bool moving = strcmp(st, "Run") == 0 || strcmp(st, "Jog") == 0 || strcmp(st, "Hold") == 0;
-  return moving || esp_timer_get_time() - g_last_gcode_us < STREAMING_WINDOW_US;
+  return strcmp(st, "Run") == 0 || strcmp(st, "Jog") == 0 || strcmp(st, "Hold") == 0;
+}
+
+static bool machine_busy(void) {
+  return grbl_running() || esp_timer_get_time() - g_last_gcode_us < STREAMING_WINDOW_US;
 }
 
 static void close_client(const char *reason) {
@@ -487,6 +494,14 @@ static void bridge_task(void *arg) {
         close_client("send failed");
         break;
       }
+    }
+
+    // Without a sender nothing asks GRBL for its status, so the panel and the LED would stay blank.
+    // Status reports are filtered out of the console, and polling stops as soon as a sender connects.
+    if (g_usb_ready && g_client < 0 && esp_timer_get_time() - g_last_poll_us >= STATUS_POLL_US) {
+      static const uint8_t query = '?';
+      g_last_poll_us = esp_timer_get_time();
+      usb_write(&query, 1);
     }
   }
 }
@@ -771,6 +786,11 @@ static esp_err_t settings_handler(httpd_req_t *req) {
   if (cfg.baud < 1200 || cfg.baud > 2000000 || cfg.port == 0 || cfg.port == 80) {
     return reply(req, "400 Bad Request", "err_bad_settings");
   }
+  // A restart or a baud change in the middle of a job would leave the machine running unattended.
+  if (grbl_running()) return reply(req, "409 Conflict", "err_job_running");
+  if (g_client >= 0 && (cfg.baud != g_cfg.baud || cfg.port != g_cfg.port)) {
+    return reply(req, "409 Conflict", "err_busy");
+  }
 
   const bool port_changed = cfg.port != g_cfg.port;
   const bool baud_changed = cfg.baud != g_cfg.baud;
@@ -791,6 +811,7 @@ static esp_err_t wifi_handler(httpd_req_t *req) {
   const bool ok = form_field(body, "ssid", ssid, sizeof(ssid)) && ssid[0] && form_field(body, "pass", pass, sizeof(pass));
   const size_t plen = strlen(pass);
   if (!ok || (plen > 0 && plen < 8)) return reply(req, "400 Bad Request", "err_bad_wifi");
+  if (grbl_running()) return reply(req, "409 Conflict", "err_job_running");
   if (save_wifi(ssid, pass) != ESP_OK) return reply(req, "500 Internal Server Error", "err_save");
   log_msg("Wi-Fi settings changed to %s, restarting", ssid);
   g_restart = true;
@@ -838,6 +859,7 @@ static esp_err_t update_handler(httpd_req_t *req) {
 
 static esp_err_t reboot_handler(httpd_req_t *req) {
   if (deny_on_ap(req)) return ESP_OK;
+  if (grbl_running()) return reply(req, "409 Conflict", "err_job_running");
   g_restart = true;
   return reply(req, "200 OK", "ok");
 }

@@ -235,7 +235,7 @@ form>button{margin-top:18px}
         <div class="progress" id="prog"><i id="prog_i"></i></div>
         <div class="btns">
           <button id="b_upd" onclick="update()"><svg class="ic"><use href="#i-up"/></svg><span data-i="upload"></span></button>
-          <button class="ghost" onclick="reboot()"><svg class="ic"><use href="#i-power"/></svg><span data-i="reboot"></span></button>
+          <button class="ghost" id="b_rb" onclick="reboot()"><svg class="ic"><use href="#i-power"/></svg><span data-i="reboot"></span></button>
         </div>
       </section>
     </div>
@@ -287,6 +287,7 @@ d:'d',h:'h',m:'min',k_fw:'Firmware',dbm:'dBm',B:'B',KB:'KB',MB:'MB',
 p_off:'Offline',p_setup:'Setup mode',p_nousb:'No machine',p_alarm:'Alarm',p_run:'Running',p_hold:'Paused',p_ready:'Ready',
 ap_banner:'Setup mode: enter your Wi-Fi network below. Machine control is disabled on the access point {ap}.',
 busy:'Sender {ip} is connected: the console is read-only, STOP still works.',
+job:'GRBL is running: restart, Wi-Fi and settings are locked until it stops.',
 nousb:'Connect the machine to the native USB port of the bridge.',noconn:'No connection to the bridge. Retrying…',
 saved:'Settings saved',confirm_wifi:'The bridge will restart and join the new network. Continue?',
 wifi_saved:'Saved. The bridge is restarting…',confirm_reboot:'Restart the bridge?',rebooting:'The bridge is restarting…',
@@ -311,6 +312,7 @@ d:'д',h:'ч',m:'мин',k_fw:'Прошивка',dbm:'дБм',B:'Б',KB:'КБ',M
 p_off:'Нет связи',p_setup:'Настройка',p_nousb:'Нет станка',p_alarm:'Тревога',p_run:'Работает',p_hold:'Пауза',p_ready:'Готов',
 ap_banner:'Режим настройки: укажите сеть Wi-Fi ниже. Через точку доступа {ap} управлять станком нельзя.',
 busy:'Подключена программа {ip}: консоль только для чтения, СТОП работает.',
+job:'Идёт работа: перезагрузка, Wi-Fi и настройки заблокированы до остановки станка.',
 nousb:'Подключите станок к встроенному USB-порту моста.',noconn:'Нет связи с мостом. Повторяю…',
 saved:'Настройки сохранены',confirm_wifi:'Мост перезагрузится и подключится к новой сети. Продолжить?',
 wifi_saved:'Сохранено. Мост перезагружается…',confirm_reboot:'Перезагрузить мост?',rebooting:'Мост перезагружается…',
@@ -377,10 +379,14 @@ function render(){
   $('tiles').innerHTML=h;
   document.querySelectorAll('.ctl').forEach(e=>e.style.display=st.ap?'none':'');
   const lock=st.client||!st.usb;
+  const running=st.state==='Run'||st.state==='Jog'||st.state.startsWith('Hold');
   document.querySelectorAll('.c').forEach(b=>b.disabled=lock);$('line').disabled=lock;
+  document.querySelectorAll('#f_set input,#f_set select,#f_set button').forEach(e=>e.disabled=st.client||running);
+  document.querySelectorAll('#f_wifi input,#f_wifi button').forEach(e=>e.disabled=running);
   $('stop').disabled=!st.usb;$('b_pause').disabled=!st.usb;
+  $('b_rb').disabled=running;$('b_upd').disabled=st.client||running;
   $('stop').classList.toggle('armed',st.state==='Run'||st.state==='Jog');
-  const hint=st.client?t('busy',{ip:st.client_ip}):(!st.usb?t('nousb'):'');
+  const hint=st.client?t('busy',{ip:st.client_ip}):(!st.usb?t('nousb'):(running?t('job'):''));
   $('busy').textContent=hint;$('busy').classList.toggle('show',!!hint);
   if(!filled){const f=$('f_set');f.baud.value=st.baud;f.port.value=st.port;f.safety.checked=st.safety;$('ssid').value=st.ssid||'';filled=true}
 }
