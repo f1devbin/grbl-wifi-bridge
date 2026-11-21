@@ -148,6 +148,11 @@ form>button{margin-top:18px}
   background-size:200% 100%;transition:width .2s;animation:shimmer 1.2s linear infinite}
 
 /* toasts */
+.foot{display:flex;justify-content:center;margin:22px 0 6px}
+.foot a{display:inline-flex;align-items:center;gap:9px;padding:9px 16px;border-radius:12px;color:#aebdce;text-decoration:none;
+  font-weight:700;font-size:16px;border:1px solid var(--line);background:rgba(0,0,0,.22);transition:color .2s,border-color .2s,transform .2s}
+.foot a:hover{color:#fff;border-color:#fff;transform:translateY(-1px)}
+.foot .ic{width:21px;height:21px}
 #toasts{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:50;display:flex;flex-direction:column;gap:10px;
   width:min(560px,calc(100% - 32px));pointer-events:none}
 .toast{display:flex;align-items:center;gap:12px;padding:14px 18px;border-radius:14px;font-weight:800;color:#fff;
@@ -183,6 +188,7 @@ form>button{margin-top:18px}
   <symbol id="i-power" viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></symbol>
   <symbol id="i-save" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+  <symbol id="i-gh" viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></symbol>
 </svg>
 
 <header>
@@ -269,6 +275,11 @@ form>button{margin-top:18px}
       </section>
     </div>
   </div>
+  <footer class="foot">
+    <a href="https://github.com/f1devbin/grbl-wifi-bridge" target="_blank" rel="noopener noreferrer">
+      <svg class="ic" aria-hidden="true"><use href="#i-gh"/></svg><span data-i="github"></span>
+    </a>
+  </footer>
 </div>
 <div id="toasts" aria-live="assertive"></div>
 
@@ -292,7 +303,7 @@ nousb:'Connect the machine to the native USB port of the bridge.',noconn:'No con
 saved:'Settings saved',confirm_wifi:'The bridge will restart and join the new network. Continue?',
 wifi_saved:'Saved. The bridge is restarting…',confirm_reboot:'Restart the bridge?',rebooting:'The bridge is restarting…',
 choose:'Choose a .bin firmware file first',uploading:'Uploading {p}%',updated:'Firmware updated. The bridge is restarting…',
-stopped:'STOP sent: GRBL reset',
+stopped:'STOP sent: GRBL reset',github:'Source code on GitHub',
 err_empty:'Empty command',err_no_usb:'Machine not connected',err_busy:'A connected program is controlling the machine',
 err_too_long:'Request too long',err_bad_settings:'Invalid baud rate or port',err_save:'Could not save',
 port_changed:'Port changed. The bridge is restarting…',err_bad_wifi:'Invalid network name or password (at least 8 characters)',
@@ -317,7 +328,7 @@ nousb:'Подключите станок к встроенному USB-порт�
 saved:'Настройки сохранены',confirm_wifi:'Мост перезагрузится и подключится к новой сети. Продолжить?',
 wifi_saved:'Сохранено. Мост перезагружается…',confirm_reboot:'Перезагрузить мост?',rebooting:'Мост перезагружается…',
 choose:'Сначала выберите файл прошивки .bin',uploading:'Загрузка {p}%',updated:'Прошивка обновлена. Мост перезагружается…',
-stopped:'СТОП отправлен: сброс GRBL',
+stopped:'СТОП отправлен: сброс GRBL',github:'Исходный код на GitHub',
 err_empty:'Пустая команда',err_no_usb:'Станок не подключён',err_busy:'Станком управляет подключённая программа',
 err_too_long:'Слишком длинный запрос',err_bad_settings:'Неверная скорость или порт',err_save:'Не удалось сохранить',
 port_changed:'Порт изменён. Мост перезагружается…',err_bad_wifi:'Неверное имя сети или пароль (минимум 8 символов)',
@@ -440,7 +451,7 @@ function update(){
     if(x.status===200){fill.style.width='100%';toast(t('updated'))}else{bar.classList.remove('show');toast(t((x.responseText||'').trim()||'err_net'),true)}};
   x.open('POST','/api/update');x.send(f);
 }
-applyLang();poll();setInterval(poll,1000);setInterval(logPoll,500);
+applyLang();poll();setInterval(poll,1000);setInterval(logPoll,1000);
 </script>
 </body>
 </html>

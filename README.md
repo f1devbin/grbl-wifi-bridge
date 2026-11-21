@@ -16,6 +16,7 @@ GRBL Wi-Fi Bridge turns an ESP32-S3 board into a **Wi-Fi adapter for any GRBL ma
 - **Raw TCP bridge on port 23**: bytes pass through unchanged, so G-code streaming, real-time commands (`?`, `!`, `~`, `Ctrl-X`) and GRBL settings work exactly as over a USB cable.
 - **Web control panel** at `http://grbl-bridge.local/`: status, big STOP button, pause and resume, GRBL console with quick commands (`$I`, `$$`, `$X`, `$H`), settings, Wi-Fi, firmware update. English and Russian, adaptive layout for phones, high-contrast large text.
 - **Live GRBL state**: when no sender is connected the bridge asks GRBL for its status every 2 s, so the panel and the LED show Idle, Alarm or Run before you open a program.
+- **Self-recovery**: if the web panel stops answering (for example after an unusual USB disconnect), the bridge restarts itself within about 90 s. The panel links to this repository.
 - **Safety**: if the connection to the sender drops during a job (Wi-Fi lost, laptop asleep, program crashed), the bridge sends feed hold and a GRBL reset, which stops motion and switches the laser or spindle off.
 - **Wi-Fi setup three ways**: from the web flasher (Improv), from the setup access point `GRBL-Bridge-setup`, or from the web panel.
 - **Over-the-air updates** with automatic rollback if a new image fails to start.

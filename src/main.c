@@ -29,7 +29,7 @@
 #include "usb/vcp_cp210x.h"
 #include "usb/vcp_ftdi.h"
 
-#define FW_VERSION "1.6.0"
+#define FW_VERSION "1.6.2"
 #define FW_NAME "GRBL Wi-Fi Bridge"
 #define HOSTNAME "grbl-bridge"
 #define AP_SSID "GRBL-Bridge-setup"
@@ -93,6 +93,7 @@ static portMUX_TYPE g_lock = portMUX_INITIALIZER_UNLOCKED;
 static char g_log[LOG_SIZE];
 static uint32_t g_log_total;
 static char g_state[16] = "-";
+static uint32_t g_boots;
 
 // ---------------------------------------------------------------- log & state
 
@@ -312,11 +313,16 @@ static void usb_device_task(void *arg) {
     uint32_t ev = 0;
     xTaskNotifyWait(0, UINT32_MAX, &ev, portMAX_DELAY);
     if (ev & EV_USB_GONE) {
+      // Stop writers and the status poll before closing. The old code closed the
+      // device while holding g_usb_mutex; on some CH340 disconnects that close
+      // blocked and the whole bridge stopped answering until a power cycle.
+      g_usb_ready = false;
+      cdc_acm_dev_hdl_t closing = NULL;
       xSemaphoreTake(g_usb_mutex, portMAX_DELAY);
-      if (g_cdc) cdc_acm_host_close(g_cdc);
+      closing = g_cdc;
       g_cdc = NULL;
       xSemaphoreGive(g_usb_mutex);
-      g_usb_ready = false;
+      if (closing) cdc_acm_host_close(closing);
       g_drop_client = true;
       g_usb_driver = "-";
       set_state("-");
@@ -716,7 +722,7 @@ static esp_err_t page_handler(httpd_req_t *req) {
 }
 
 static esp_err_t status_handler(httpd_req_t *req) {
-  char ssid[70], state[16], state_esc[40], json[768];
+  char ssid[70], state[16], state_esc[40], json[1024];
   json_escape(g_ssid, ssid, sizeof(ssid));
   get_state(state, sizeof(state));
   json_escape(state, state_esc, sizeof(state_esc));
@@ -726,12 +732,15 @@ static esp_err_t status_handler(httpd_req_t *req) {
   snprintf(json, sizeof(json),
            "{\"ap\":%s,\"wifi\":%s,\"ssid\":\"%s\",\"rssi\":%d,\"ip\":\"%s\",\"usb\":%s,\"vid\":\"%04x\",\"pid\":\"%04x\","
            "\"driver\":\"%s\",\"state\":\"%s\",\"tripped\":%s,\"client\":%s,\"client_ip\":\"%s\",\"tx\":%lu,\"rx\":%lu,"
-           "\"uptime\":%lld,\"version\":\"%s\",\"baud\":%lu,\"port\":%u,\"safety\":%s,\"host\":\"%s\",\"ap_ssid\":\"%s\"}",
+           "\"uptime\":%lld,\"version\":\"%s\",\"baud\":%lu,\"port\":%u,\"safety\":%s,\"host\":\"%s\",\"ap_ssid\":\"%s\","
+           "\"reset\":%d,\"boots\":%lu,\"heap\":%lu,\"min_heap\":%lu}",
            sock_is_ap(httpd_req_to_sockfd(req)) ? "true" : "false", g_wifi_ok ? "true" : "false", ssid, rssi, g_ip,
            g_usb_ready ? "true" : "false", g_usb_vid, g_usb_pid, g_usb_driver, state_esc,
            g_safety_tripped ? "true" : "false", g_client >= 0 ? "true" : "false", g_client_ip,
            (unsigned long)g_tx_bytes, (unsigned long)g_rx_bytes, esp_timer_get_time() / 1000000, FW_VERSION,
-           (unsigned long)g_cfg.baud, g_cfg.port, g_cfg.safety ? "true" : "false", HOSTNAME, AP_SSID);
+           (unsigned long)g_cfg.baud, g_cfg.port, g_cfg.safety ? "true" : "false", HOSTNAME, AP_SSID,
+           (int)esp_reset_reason(), (unsigned long)g_boots, (unsigned long)esp_get_free_heap_size(),
+           (unsigned long)esp_get_minimum_free_heap_size());
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
   return httpd_resp_sendstr(req, json);
@@ -746,8 +755,9 @@ static esp_err_t log_handler(httpd_req_t *req) {
     since = strtoul(value, NULL, 10);
   }
 
-  char *out = malloc(LOG_SIZE + 16);
-  if (!out) return reply(req, "500 Internal Server Error", "err_no_mem");
+  // Static buffer: the HTTP server handles one request at a time, and this avoids
+  // an 8 KB malloc/free every 500 ms from the web panel's log polling.
+  static char out[LOG_SIZE + 16];
   portENTER_CRITICAL(&g_lock);
   const uint32_t total = g_log_total;
   uint32_t start = since > total ? 0 : since;
@@ -758,9 +768,7 @@ static esp_err_t log_handler(httpd_req_t *req) {
 
   httpd_resp_set_type(req, "text/plain; charset=utf-8");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-  const esp_err_t err = httpd_resp_send(req, out, n);
-  free(out);
-  return err;
+  return httpd_resp_send(req, out, n);
 }
 
 static esp_err_t cmd_handler(httpd_req_t *req) {
@@ -1147,6 +1155,43 @@ static void start_improv(void) {
   xTaskCreate(improv_task, "improv", 6144, NULL, 4, NULL);
 }
 
+// ---------------------------------------------------------------- health
+
+// The web panel and the TCP listener share lwIP and the HTTP server. If either gets
+// stuck (the bridge used to need a power cycle after some CH340 disconnects), this
+// task notices that the local status page stopped answering and restarts the bridge.
+static void health_task(void *arg) {
+  vTaskDelay(pdMS_TO_TICKS(30000));
+  int fails = 0;
+  while (true) {
+    bool ok = false;
+    const int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (fd >= 0) {
+      const struct timeval tv = {.tv_sec = 3, .tv_usec = 0};
+      setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+      setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+      struct sockaddr_in addr = {.sin_family = AF_INET, .sin_port = htons(80), .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+      if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
+        static const char req[] = "GET /api/status HTTP/1.0\r\nHost: localhost\r\n\r\n";
+        if (send(fd, req, sizeof(req) - 1, 0) > 0) {
+          char reply[16];
+          const int n = recv(fd, reply, sizeof(reply) - 1, 0);
+          ok = n > 0 && strncmp(reply, "HTTP/1.", 7) == 0;
+        }
+      }
+      close(fd);
+    }
+    if (ok) {
+      fails = 0;
+    } else if (++fails >= 3) {
+      log_msg("Web panel stopped answering, restarting the bridge");
+      vTaskDelay(pdMS_TO_TICKS(500));
+      esp_restart();
+    }
+    vTaskDelay(pdMS_TO_TICKS(30000));
+  }
+}
+
 // ---------------------------------------------------------------- main
 
 void app_main(void) {
@@ -1162,6 +1207,14 @@ void app_main(void) {
   g_usb_mutex = xSemaphoreCreateMutex();
   g_rx_stream = xStreamBufferCreate(RX_STREAM_SIZE, 1);
   load_config();
+  nvs_handle_t boot_h;
+  if (nvs_open("cfg", NVS_READWRITE, &boot_h) == ESP_OK) {
+    nvs_get_u32(boot_h, "boots", &g_boots);
+    g_boots++;
+    nvs_set_u32(boot_h, "boots", g_boots);
+    nvs_commit(boot_h);
+    nvs_close(boot_h);
+  }
   log_msg(FW_NAME " %s, Wi-Fi %s", FW_VERSION, g_has_creds ? g_ssid : "not configured");
 
   xTaskCreate(monitor_task, "monitor", 4096, NULL, 3, NULL);
@@ -1170,5 +1223,6 @@ void app_main(void) {
   start_mdns();
   start_usb();
   start_http();
+  xTaskCreate(health_task, "health", 4096, NULL, 2, NULL);
   xTaskCreate(bridge_task, "bridge", 6144, NULL, 8, NULL);
 }
