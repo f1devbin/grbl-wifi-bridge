@@ -23,7 +23,7 @@ GRBL Wi-Fi Bridge turns an ESP32-S3 board into a **Wi-Fi adapter for any GRBL ma
 - **Over-the-air updates** with automatic rollback if a new image fails to start.
 - **Status LED** (WS2812 on GPIO48): colour shows Wi-Fi, machine and job state.
 - **Local job player**: upload a `.gcode` file (up to 4 MB) to PSRAM, scale power and speed at start, and play it over USB. Wi-Fi is only needed for the upload.
-- **Wi-Fi picker**: in AP setup mode the panel scans nearby networks and offers a dropdown with a refresh button.
+- **Wi-Fi picker**: the panel scans nearby networks and offers a dropdown with a refresh button; the current network is always listed. A scan in STA mode uses an async timeout and cannot stall the panel.
 
 ## What you need
 

@@ -22,6 +22,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/stream_buffer.h"
+#include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "led_strip.h"
 #include "lwip/sockets.h"
@@ -34,7 +35,7 @@
 #include "usb/vcp_cp210x.h"
 #include "usb/vcp_ftdi.h"
 
-#define FW_VERSION "1.7.0"
+#define FW_VERSION "1.7.1"
 #define FW_NAME "GRBL Wi-Fi Bridge"
 #define HOSTNAME "grbl-bridge"
 #define AP_SSID "GRBL-Bridge-setup"
@@ -69,6 +70,8 @@ static char g_pass[65];
 static bool g_has_creds;
 
 static volatile bool g_wifi_ok;
+static EventGroupHandle_t g_wifi_scan_events;
+#define WIFI_SCAN_DONE_BIT BIT0
 static volatile bool g_wifi_started;
 static volatile bool g_ap_active;
 static volatile bool g_drop_client;
@@ -608,6 +611,8 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     g_drop_client = true;
     strlcpy(g_ip, "-", sizeof(g_ip));
     if (g_has_creds) esp_timer_start_once(g_sta_retry_timer, STA_RETRY_US);
+  } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+    if (g_wifi_scan_events) xEventGroupSetBits(g_wifi_scan_events, WIFI_SCAN_DONE_BIT);
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
     const ip_event_got_ip_t *ev = (const ip_event_got_ip_t *)data;
     snprintf(g_ip, sizeof(g_ip), IPSTR, IP2STR(&ev->ip_info.ip));
@@ -1127,20 +1132,27 @@ static esp_err_t job_stop_handler(httpd_req_t *req) {
 }
 
 static esp_err_t scan_handler(httpd_req_t *req) {
+  if (!g_wifi_scan_events) return reply(req, "503 Service Unavailable", "err_scan");
   wifi_mode_t mode;
-  if (esp_wifi_get_mode(&mode) != ESP_OK || (mode != WIFI_MODE_AP && mode != WIFI_MODE_APSTA)) {
-    // A blocking scan in STA mode can stall the HTTP task and drop the panel.
-    // Scanning is only offered in AP setup mode, where it is safe.
-    return reply(req, "409 Conflict", "err_scan_sta");
+  if (esp_wifi_get_mode(&mode) != ESP_OK) {
+    return reply(req, "503 Service Unavailable", "err_scan");
   }
   if (mode == WIFI_MODE_AP) {
     // Scanning needs the STA interface; keep the AP alive for the panel.
     esp_wifi_set_mode(WIFI_MODE_APSTA);
   }
+  xEventGroupClearBits(g_wifi_scan_events, WIFI_SCAN_DONE_BIT);
   wifi_scan_config_t cfg = {0};
   cfg.show_hidden = true;
-  if (esp_wifi_scan_start(&cfg, true) != ESP_OK) {
+  if (esp_wifi_scan_start(&cfg, false) != ESP_OK) {
     return reply(req, "503 Service Unavailable", "err_scan");
+  }
+  // Async scan with a hard timeout: even if the driver stalls, the HTTP task
+  // returns and the web panel keeps answering.
+  const EventBits_t bits = xEventGroupWaitBits(g_wifi_scan_events, WIFI_SCAN_DONE_BIT, pdTRUE, pdFALSE,
+                                               pdMS_TO_TICKS(6000));
+  if (!(bits & WIFI_SCAN_DONE_BIT)) {
+    return reply(req, "503 Service Unavailable", "err_scan_timeout");
   }
   uint16_t num = 0;
   esp_wifi_scan_get_ap_num(&num);
@@ -1515,6 +1527,7 @@ void app_main(void) {
 
   g_usb_mutex = xSemaphoreCreateMutex();
   g_rx_stream = xStreamBufferCreate(RX_STREAM_SIZE, 1);
+  g_wifi_scan_events = xEventGroupCreate();
   g_job_data = heap_caps_malloc(JOB_MAX_BYTES, MALLOC_CAP_SPIRAM);
   if (g_job_data) {
     log_msg("Job buffer: %u KiB in PSRAM", (unsigned)(JOB_MAX_BYTES / 1024));
