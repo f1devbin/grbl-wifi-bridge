@@ -59,7 +59,7 @@ T = {
             ("Emergency stop", "If the sender disconnects during a job, the bridge sends feed hold and a GRBL "
                                "reset: motion stops, laser and spindle switch off."),
             ("Easy Wi-Fi setup", "From this page, from the setup access point or from the web panel. "
-                                 "mDNS name grbl-bridge.local."),
+                                 "DHCP: reserve the bridge's address in your router."),
             ("Safe updates", "Over-the-air updates with automatic rollback if a new image does not start."),
         ],
         "software": "Connect your software",
@@ -144,7 +144,7 @@ T = {
             ("Аварийный стоп", "Если программа отключилась во время работы, мост отправляет паузу и сброс GRBL: "
                                "движение останавливается, лазер и шпиндель выключаются."),
             ("Простая настройка Wi-Fi", "С этой страницы, через точку доступа настройки или в веб-панели. "
-                                        "Имя в сети grbl-bridge.local."),
+                                        "DHCP: зарезервируйте адрес моста в роутере."),
             ("Безопасные обновления", "Обновление по воздуху с автоматическим откатом, если новая прошивка не запустилась."),
         ],
         "software": "Подключение программ",
@@ -354,7 +354,7 @@ def page(lang: str) -> str:
     )
     sw = "".join(
         f'<div class="card item reveal"><h3>{esc(h)}</h3><p>{esc(p)}</p>'
-        + ('<pre>socat pty,link=$HOME/ttyGRBL,raw,echo=0 \\\n  tcp:grbl-bridge.local:23</pre>' if i == 2 else "")
+        + ('<pre>socat pty,link=$HOME/ttyGRBL,raw,echo=0 \\\n  tcp:<bridge-ip>:23</pre>' if i == 2 else "")
         + "</div>"
         for i, (h, p) in enumerate(t["sw"])
     )

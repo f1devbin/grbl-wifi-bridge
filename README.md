@@ -14,7 +14,7 @@ GRBL Wi-Fi Bridge turns an ESP32-S3 board into a **Wi-Fi adapter for any GRBL ma
 
 - **USB host on the ESP32-S3**: talks to the machine's USB serial chip directly. Drivers for CH340/CH341, CP210x, FTDI and any CDC-ACM device (CH343, native USB controllers).
 - **Raw TCP bridge on port 23**: bytes pass through unchanged, so G-code streaming, real-time commands (`?`, `!`, `~`, `Ctrl-X`) and GRBL settings work exactly as over a USB cable.
-- **Web control panel** at `http://grbl-bridge.local/`: status, big STOP button, pause and resume, GRBL console with quick commands (`$I`, `$$`, `$X`, `$H`), settings, Wi-Fi, firmware update. English and Russian, adaptive layout for phones, high-contrast large text.
+- **Web control panel** at the bridge's IP address: status, big STOP button, pause and resume, GRBL console with quick commands (`$I`, `$$`, `$X`, `$H`), settings, Wi-Fi, firmware update. English and Russian, adaptive layout for phones, high-contrast large text.
 - **Live GRBL state**: when no sender is connected the bridge asks GRBL for its status every 2 s, so the panel and the LED show Idle, Alarm or Run before you open a program.
 - **Self-recovery**: if the web panel stops answering (for example after an unusual USB disconnect), the bridge restarts itself within about 90 s. The panel links to this repository.
 - **Update check and one-click update**: the panel asks GitHub for the latest release; if a newer version exists, it shows a banner. The OTA image is downloaded by the browser and installed through the normal update endpoint.
@@ -22,11 +22,12 @@ GRBL Wi-Fi Bridge turns an ESP32-S3 board into a **Wi-Fi adapter for any GRBL ma
 - **Wi-Fi setup three ways**: from the web flasher (Improv), from the setup access point `GRBL-Bridge-setup`, or from the web panel.
 - **Over-the-air updates** with automatic rollback if a new image fails to start.
 - **Status LED** (WS2812 on GPIO48): colour shows Wi-Fi, machine and job state.
-- **mDNS** name `grbl-bridge.local`, advertised `_http._tcp` and `_telnet._tcp` services.
+- **Local job player**: upload a `.gcode` file (up to 4 MB) to PSRAM, scale power and speed at start, and play it over USB. Wi-Fi is only needed for the upload.
+- **Wi-Fi picker**: in AP setup mode the panel scans nearby networks and offers a dropdown with a refresh button.
 
 ## What you need
 
-- An ESP32-S3 board with **native USB OTG** (GPIO19/GPIO20) and **at least 8 MB of flash**. Boards in the ESP32-S3-DevKitC-1 style with two USB-C ports are the easiest: one port goes through a USB-UART chip for power and flashing, the other is the native USB port for the machine.
+- An ESP32-S3 board with **native USB OTG** (GPIO19/GPIO20) and **at least 8 MB of flash and 8 MB PSRAM**. Boards in the ESP32-S3-DevKitC-1 style with two USB-C ports are the easiest: one port goes through a USB-UART chip for power and flashing, the other is the native USB port for the machine.
 - 5 V on the native USB port, so the machine's USB chip is powered. On many dual-USB-C boards this needs a solder jumper (often marked `USB-OTG`) that connects the VBUS lines of both ports. **First check whether your machine already drives 5 V on its own USB port**: if it does, do not close that jumper.
 - A USB power adapter for the ESP32-S3, plugged into its USB-UART port.
 
@@ -35,14 +36,15 @@ GRBL Wi-Fi Bridge turns an ESP32-S3 board into a **Wi-Fi adapter for any GRBL ma
 1. Open the **[web flasher](https://f1devbin.github.io/grbl-wifi-bridge/)**, connect the ESP32-S3 to your computer through its USB-UART port and press **Install**.
 2. When the flasher asks, choose your Wi-Fi network and enter the password. It shows a link to the bridge when it is online.
 3. Unplug the board from the computer, power it from a USB adapter and connect the machine to its native USB port.
-4. Open `http://grbl-bridge.local/` (or the IP address from your router) and check that the machine is shown as connected and GRBL answers `$I`.
+4. Find the bridge's IP address in your router (DHCP lease list), open `http://<bridge-ip>/` and check that the machine is shown as connected and GRBL answers `$I`.
+5. Reserve that address in the router so the IP does not change after a reboot. mDNS is not used.
 5. Connect your sender:
    - **LightBurn**: Devices → Create Manually → GRBL → Ethernet/TCP → address of the bridge, port 23.
    - **Universal Gcode Sender**: Tools → Options → Sender Options → Connection driver: TCP; then connect to the bridge address, port 23.
    - **Programs that only open serial ports** (Linux, macOS):
 
      ```bash
-     socat pty,link=$HOME/ttyGRBL,raw,echo=0 tcp:grbl-bridge.local:23
+     socat pty,link=$HOME/ttyGRBL,raw,echo=0 tcp:<bridge-ip>:23
      ```
 
      and choose `~/ttyGRBL` as the port.
@@ -79,7 +81,7 @@ Controllers that already have Wi-Fi (FluidNC, Grbl_ESP32) do not need this bridg
 
 ## Build from source
 
-The firmware is built with ESP-IDF 6.1 through PlatformIO; USB host drivers, the WS2812 driver and mDNS come from the ESP Component Registry (`src/idf_component.yml`).
+The firmware is built with ESP-IDF 6.1 through PlatformIO; USB host drivers and the WS2812 driver come from the ESP Component Registry (`src/idf_component.yml`).
 
 ```bash
 pip install platformio
@@ -89,7 +91,7 @@ pio run
 Update over Wi-Fi without touching settings:
 
 ```bash
-curl --data-binary @.pio/build/esp32s3/firmware.bin http://grbl-bridge.local/api/update
+curl --data-binary @.pio/build/esp32s3/firmware.bin http://<bridge-ip>/api/update
 ```
 
 or upload `firmware.bin` in the web panel. A new image is confirmed after it runs for 30 s; if it crashes before that, the bootloader rolls back to the previous one.

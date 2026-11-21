@@ -1,4 +1,5 @@
 // GRBL Wi-Fi Bridge: ESP32-S3 USB host <-> raw TCP (port 23) + web panel.
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -12,6 +13,8 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_ota_ops.h"
+#include "esp_heap_caps.h"
+#include "esp_psram.h"
 #include "esp_system.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
@@ -22,7 +25,6 @@
 #include "freertos/task.h"
 #include "led_strip.h"
 #include "lwip/sockets.h"
-#include "mdns.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "driver/uart.h"
@@ -32,7 +34,7 @@
 #include "usb/vcp_cp210x.h"
 #include "usb/vcp_ftdi.h"
 
-#define FW_VERSION "1.6.3"
+#define FW_VERSION "1.7.0"
 #define FW_NAME "GRBL Wi-Fi Bridge"
 #define HOSTNAME "grbl-bridge"
 #define AP_SSID "GRBL-Bridge-setup"
@@ -98,6 +100,15 @@ static char g_log[LOG_SIZE];
 static uint32_t g_log_total;
 static char g_state[16] = "-";
 static uint32_t g_boots;
+
+#define JOB_MAX_BYTES (4 * 1024 * 1024)
+static char *g_job_data;
+static size_t g_job_size, g_job_pos;
+static char g_job_name[64] = "job.gcode";
+static volatile int g_job_state;  // 0 empty, 1 loaded, 2 running, 3 paused, 4 error
+static volatile uint32_t g_job_lines, g_job_ok;
+static volatile int g_job_power_pct = 100, g_job_speed_pct = 100;
+static volatile int g_job_max_s, g_job_max_f;
 
 // ---------------------------------------------------------------- log & state
 
@@ -243,7 +254,7 @@ static void emergency_stop(const char *reason) {
 
 static bool on_cdc_data(const uint8_t *data, size_t len, void *arg) {
   g_rx_bytes += len;
-  if (g_client >= 0) xStreamBufferSend(g_rx_stream, data, len, pdMS_TO_TICKS(200));
+  xStreamBufferSend(g_rx_stream, data, len, pdMS_TO_TICKS(200));
   parse_rx(data, len);
   return true;
 }
@@ -409,7 +420,7 @@ static void accept_client(int listen_fd) {
   const int fd = accept(listen_fd, (struct sockaddr *)&addr, &len);
   if (fd < 0) return;
 
-  if (g_client >= 0 || sock_is_ap(fd)) {
+  if (g_client >= 0 || g_job_state == 2 || g_job_state == 3 || sock_is_ap(fd)) {
     // One sender at a time; no machine control from the setup access point.
     close(fd);
     return;
@@ -454,8 +465,8 @@ static void note_client_data(const uint8_t *buf, int n) {
       i++;
     }
     if (i >= n) return;
-    if (buf[i] == '$') {
-      // $J (jog) and $H (homing) move the machine; other $ commands are settings or queries.
+    const char c = (char)buf[i];
+    if (c == '$') {
       if (i + 1 < n && (buf[i + 1] == 'J' || buf[i + 1] == 'j' || buf[i + 1] == 'H' || buf[i + 1] == 'h')) {
         g_last_gcode_us = esp_timer_get_time();
         return;
@@ -463,8 +474,21 @@ static void note_client_data(const uint8_t *buf, int n) {
       while (i < n && buf[i] != '\n') i++;
       continue;
     }
-    g_last_gcode_us = esp_timer_get_time();
-    return;
+    // Only real motion or laser commands arm the emergency stop. Probe queries
+    // (M115 and similar) and comments must not reset an idle machine on disconnect.
+    if (c == 'G' || c == 'g' || c == 'M' || c == 'm') {
+      const char n1 = (i + 1 < n) ? (char)buf[i + 1] : 0;
+      if (c == 'G' || c == 'g' || n1 == '3' || n1 == '4') {
+        g_last_gcode_us = esp_timer_get_time();
+        return;
+      }
+    }
+    if (c == 'X' || c == 'Y' || c == 'Z' || c == 'x' || c == 'y' || c == 'z' || c == '-' || c == '+' ||
+        (c >= '0' && c <= '9')) {
+      g_last_gcode_us = esp_timer_get_time();
+      return;
+    }
+    while (i < n && buf[i] != '\n') i++;
   }
 }
 
@@ -520,17 +544,19 @@ static void bridge_task(void *arg) {
       }
     }
 
-    size_t got;
-    while ((got = xStreamBufferReceive(g_rx_stream, buf, sizeof(buf), 0)) > 0) {
-      if (g_client >= 0 && !send_all(g_client, buf, got)) {
-        close_client("send failed");
-        break;
+    if (g_job_state != 2 && g_job_state != 3) {
+      size_t got;
+      while ((got = xStreamBufferReceive(g_rx_stream, buf, sizeof(buf), 0)) > 0) {
+        if (g_client >= 0 && !send_all(g_client, buf, got)) {
+          close_client("send failed");
+          break;
+        }
       }
     }
 
     // Without a sender nothing asks GRBL for its status, so the panel and the LED would stay blank.
     // Status reports are filtered out of the console, and polling stops as soon as a sender connects.
-    if (g_usb_ready && g_client < 0 && esp_timer_get_time() - g_last_poll_us >= STATUS_POLL_US) {
+    if (g_usb_ready && g_client < 0 && g_job_state == 0 && esp_timer_get_time() - g_last_poll_us >= STATUS_POLL_US) {
       static const uint8_t query = '?';
       g_last_poll_us = esp_timer_get_time();
       usb_write(&query, 1);
@@ -586,7 +612,7 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     const ip_event_got_ip_t *ev = (const ip_event_got_ip_t *)data;
     snprintf(g_ip, sizeof(g_ip), IPSTR, IP2STR(&ev->ip_info.ip));
     g_wifi_ok = true;
-    log_msg("Wi-Fi %s: http://%s/ (http://%s.local/), TCP port %u", g_ssid, g_ip, HOSTNAME, g_cfg.port);
+    log_msg("Wi-Fi %s: http://%s/, TCP port %u", g_ssid, g_ip, g_cfg.port);
     stop_ap_if_idle();
   }
 }
@@ -627,13 +653,6 @@ static void start_wifi(void) {
   }
 }
 
-static void start_mdns(void) {
-  if (mdns_init() != ESP_OK) return;
-  mdns_hostname_set(HOSTNAME);
-  mdns_instance_name_set(FW_NAME);
-  mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
-  mdns_service_add(NULL, "_telnet", "_tcp", g_cfg.port, NULL, 0);
-}
 
 // ---------------------------------------------------------------- web panel
 
@@ -727,10 +746,11 @@ static esp_err_t page_handler(httpd_req_t *req) {
 }
 
 static esp_err_t status_handler(httpd_req_t *req) {
-  char ssid[70], state[16], state_esc[40], json[1024];
+  char ssid[70], state[16], state_esc[40], job_esc[80], json[1400];
   json_escape(g_ssid, ssid, sizeof(ssid));
   get_state(state, sizeof(state));
   json_escape(state, state_esc, sizeof(state_esc));
+  json_escape(g_job_name, job_esc, sizeof(job_esc));
   int rssi = 0;
   wifi_ap_record_t ap;
   if (g_wifi_ok && esp_wifi_sta_get_ap_info(&ap) == ESP_OK) rssi = ap.rssi;
@@ -738,14 +758,19 @@ static esp_err_t status_handler(httpd_req_t *req) {
            "{\"ap\":%s,\"wifi\":%s,\"ssid\":\"%s\",\"rssi\":%d,\"ip\":\"%s\",\"usb\":%s,\"vid\":\"%04x\",\"pid\":\"%04x\","
            "\"driver\":\"%s\",\"state\":\"%s\",\"tripped\":%s,\"client\":%s,\"client_ip\":\"%s\",\"tx\":%lu,\"rx\":%lu,"
            "\"uptime\":%lld,\"version\":\"%s\",\"baud\":%lu,\"port\":%u,\"safety\":%s,\"host\":\"%s\",\"ap_ssid\":\"%s\","
-           "\"reset\":%d,\"boots\":%lu,\"heap\":%lu,\"min_heap\":%lu}",
+           "\"reset\":%d,\"boots\":%lu,\"heap\":%lu,\"min_heap\":%lu,\"psram\":%lu,\"psram_free\":%lu,"
+           "\"job\":%d,\"job_name\":\"%s\",\"job_size\":%lu,\"job_pos\":%lu,\"job_lines\":%lu,\"job_ok\":%lu,"
+           "\"job_power\":%d,\"job_speed\":%d,\"job_max_s\":%d,\"job_max_f\":%d}",
            sock_is_ap(httpd_req_to_sockfd(req)) ? "true" : "false", g_wifi_ok ? "true" : "false", ssid, rssi, g_ip,
            g_usb_ready ? "true" : "false", g_usb_vid, g_usb_pid, g_usb_driver, state_esc,
            g_safety_tripped ? "true" : "false", g_client >= 0 ? "true" : "false", g_client_ip,
            (unsigned long)g_tx_bytes, (unsigned long)g_rx_bytes, esp_timer_get_time() / 1000000, FW_VERSION,
            (unsigned long)g_cfg.baud, g_cfg.port, g_cfg.safety ? "true" : "false", HOSTNAME, AP_SSID,
            (int)esp_reset_reason(), (unsigned long)g_boots, (unsigned long)esp_get_free_heap_size(),
-           (unsigned long)esp_get_minimum_free_heap_size());
+           (unsigned long)esp_get_minimum_free_heap_size(), (unsigned long)esp_psram_get_size(),
+           (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), g_job_state, job_esc,
+           (unsigned long)g_job_size, (unsigned long)g_job_pos, (unsigned long)g_job_lines,
+           (unsigned long)g_job_ok, g_job_power_pct, g_job_speed_pct, g_job_max_s, g_job_max_f);
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
   return httpd_resp_sendstr(req, json);
@@ -784,7 +809,7 @@ static esp_err_t cmd_handler(httpd_req_t *req) {
   if (!g_usb_ready) return reply(req, "503 Service Unavailable", "err_no_usb");
 
   const bool feed_hold = len == 1 && body[0] == '!';
-  if (g_client >= 0 && !feed_hold) {
+  if ((g_client >= 0 || g_job_state == 2 || g_job_state == 3) && !feed_hold) {
     return reply(req, "409 Conflict", "err_busy");
   }
 
@@ -804,6 +829,7 @@ static esp_err_t cmd_handler(httpd_req_t *req) {
 
 static esp_err_t stop_handler(httpd_req_t *req) {
   if (!g_usb_ready) return reply(req, "503 Service Unavailable", "err_no_usb");
+  g_job_state = 0;
   emergency_stop("STOP button in the web panel");
   return reply(req, "200 OK", "ok");
 }
@@ -898,10 +924,255 @@ static esp_err_t reboot_handler(httpd_req_t *req) {
   return reply(req, "200 OK", "ok");
 }
 
+// ---------------------------------------------------------------- local job
+
+// Plays a G-code file from PSRAM directly over USB. The network is only used to
+// upload the file; the job itself does not depend on Wi-Fi.
+// Scales S and F tokens in one G-code line. S is clamped to the controller's
+// $30 range, F to a sane minimum; the rest of the line is copied unchanged.
+static void apply_overrides(const char *in, char *out, size_t cap) {
+  const int pp = g_job_power_pct, sp = g_job_speed_pct;
+  if (pp == 100 && sp == 100) {
+    strlcpy(out, in, cap);
+    return;
+  }
+  size_t o = 0;
+  for (size_t i = 0; in[i] && o + 2 < cap;) {
+    const char c = in[i];
+    if ((c == 'S' || c == 's' || c == 'F' || c == 'f') &&
+        (i == 0 || !isalpha((unsigned char)in[i - 1]))) {
+      char *end = NULL;
+      const double v = strtod(in + i + 1, &end);
+      if (end && end > in + i + 1) {
+        double scaled = (c == 'S' || c == 's') ? v * pp / 100.0 : v * sp / 100.0;
+        if (c == 'S' || c == 's') {
+          if (scaled < 0) scaled = 0;
+          if (scaled > 1000) scaled = 1000;
+        } else {
+          if (scaled < 1) scaled = 1;
+          if (scaled > 10000) scaled = 10000;
+        }
+        o += (size_t)snprintf(out + o, cap - o, "%c%.3g", c, scaled);
+        i = (size_t)(end - in);
+        continue;
+      }
+    }
+    out[o++] = c;
+    i++;
+  }
+  out[o] = '\0';
+}
+
+static void job_task(void *arg) {
+  static char line[200];
+  static char rx[160];
+  while (true) {
+    if (g_job_state != 2) {
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
+    if (g_job_pos >= g_job_size) {
+      usb_write("M5\n", 3);
+      g_job_state = 0;
+      log_msg("Job finished: %lu lines", (unsigned long)g_job_ok);
+      continue;
+    }
+    size_t n = 0;
+    while (g_job_pos < g_job_size && n + 1 < sizeof(line)) {
+      const char c = g_job_data[g_job_pos++];
+      if (c == '\n') break;
+      if (c != '\r') line[n++] = c;
+    }
+    if (n == 0) continue;
+    line[n++] = '\n';
+    line[n] = '\0';
+    char scaled[256];
+    apply_overrides(line, scaled, sizeof(scaled));
+    if (usb_write(scaled, strlen(scaled)) != ESP_OK) {
+      log_msg("Job: USB write failed");
+      g_job_state = 4;
+      continue;
+    }
+    g_job_lines++;
+    bool ok = false;
+    size_t rn = 0;
+    const int64_t deadline = esp_timer_get_time() + 15000000;
+    while (esp_timer_get_time() < deadline) {
+      uint8_t c;
+      if (xStreamBufferReceive(g_rx_stream, &c, 1, pdMS_TO_TICKS(100)) != 1) {
+        if (g_job_state == 0) break;
+        continue;
+      }
+      if (c == '\r') continue;
+      if (c != '\n') {
+        if (rn + 1 < sizeof(rx)) rx[rn++] = (char)c;
+        continue;
+      }
+      rx[rn] = '\0';
+      rn = 0;
+      if (strcmp(rx, "ok") == 0) {
+        ok = true;
+        break;
+      }
+      if (strncmp(rx, "error", 5) == 0 || strncmp(rx, "ALARM", 5) == 0) {
+        log_msg("Job error: %s", rx);
+        g_job_state = 4;
+        break;
+      }
+    }
+    if (g_job_state == 0) continue;
+    if (g_job_state == 4) continue;
+    if (!ok) {
+      log_msg("Job: timeout waiting for ok");
+      g_job_state = 4;
+      continue;
+    }
+    g_job_ok++;
+  }
+}
+
+static esp_err_t job_upload_handler(httpd_req_t *req) {
+  if (deny_on_ap(req)) return ESP_OK;
+  if (g_job_state == 2 || g_job_state == 3) return reply(req, "409 Conflict", "err_job_running");
+  if (g_client >= 0) return reply(req, "409 Conflict", "err_busy");
+  if (!g_job_data) return reply(req, "503 Service Unavailable", "err_no_mem");
+  if (req->content_len == 0 || req->content_len > JOB_MAX_BYTES) {
+    return reply(req, "400 Bad Request", "err_too_long");
+  }
+  char query[96], name[64] = "job.gcode";
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+    httpd_query_key_value(query, "name", name, sizeof(name));
+  }
+  size_t got = 0;
+  while (got < req->content_len) {
+    const int n = httpd_req_recv(req, g_job_data + got, req->content_len - got);
+    if (n == HTTPD_SOCK_ERR_TIMEOUT) continue;
+    if (n <= 0) return reply(req, "500 Internal Server Error", "err_update");
+    got += (size_t)n;
+  }
+  if (got < JOB_MAX_BYTES) g_job_data[got] = '\0';
+  g_job_max_s = g_job_max_f = 0;
+  for (size_t i = 0; i < got; i++) {
+    const char c = g_job_data[i];
+    if ((c == 'S' || c == 's' || c == 'F' || c == 'f') &&
+        (i == 0 || !isalpha((unsigned char)g_job_data[i - 1]))) {
+      char *end = NULL;
+      const double v = strtod(g_job_data + i + 1, &end);
+      if (end && end > g_job_data + i + 1) {
+        if ((c == 'S' || c == 's') && v > g_job_max_s) g_job_max_s = (int)v;
+        if ((c == 'F' || c == 'f') && v > g_job_max_f) g_job_max_f = (int)v;
+        i = (size_t)(end - g_job_data) - 1;
+      }
+    }
+  }
+  g_job_size = got;
+  g_job_pos = 0;
+  g_job_lines = 0;
+  g_job_ok = 0;
+  strlcpy(g_job_name, name, sizeof(g_job_name));
+  g_job_state = 1;
+  log_msg("Job loaded: %s, %u bytes", g_job_name, (unsigned)g_job_size);
+  return reply(req, "200 OK", "ok");
+}
+
+static esp_err_t job_start_handler(httpd_req_t *req) {
+  if (deny_on_ap(req)) return ESP_OK;
+  if (!g_usb_ready) return reply(req, "503 Service Unavailable", "err_no_usb");
+  if (g_client >= 0) return reply(req, "409 Conflict", "err_busy");
+  if (g_job_state == 2 || g_job_state == 3) return reply(req, "409 Conflict", "err_job_running");
+  if (g_job_size == 0) return reply(req, "409 Conflict", "err_no_job");
+  int power = 100, speed = 100;
+  char query[64], value[8];
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+    if (httpd_query_key_value(query, "power", value, sizeof(value)) == ESP_OK) power = atoi(value);
+    if (httpd_query_key_value(query, "speed", value, sizeof(value)) == ESP_OK) speed = atoi(value);
+  }
+  if (power < 10) power = 10;
+  if (power > 150) power = 150;
+  if (speed < 10) speed = 10;
+  if (speed > 200) speed = 200;
+  g_job_power_pct = power;
+  g_job_speed_pct = speed;
+  g_job_pos = 0;
+  g_job_lines = 0;
+  g_job_ok = 0;
+  g_job_state = 2;
+  log_msg("Job started: %s, power %d%%, speed %d%%", g_job_name, power, speed);
+  return reply(req, "200 OK", "ok");
+}
+
+static esp_err_t job_pause_handler(httpd_req_t *req) {
+  if (g_job_state != 2) return reply(req, "409 Conflict", "err_no_job");
+  const uint8_t hold = '!';
+  usb_write(&hold, 1);
+  g_job_state = 3;
+  log_msg("Job paused");
+  return reply(req, "200 OK", "ok");
+}
+
+static esp_err_t job_resume_handler(httpd_req_t *req) {
+  if (g_job_state != 3) return reply(req, "409 Conflict", "err_no_job");
+  const uint8_t resume = '~';
+  usb_write(&resume, 1);
+  g_job_state = 2;
+  log_msg("Job resumed");
+  return reply(req, "200 OK", "ok");
+}
+
+static esp_err_t job_stop_handler(httpd_req_t *req) {
+  if (g_job_state != 2 && g_job_state != 3) return reply(req, "409 Conflict", "err_no_job");
+  g_job_state = 0;
+  emergency_stop("local job stopped from the panel");
+  return reply(req, "200 OK", "ok");
+}
+
+static esp_err_t scan_handler(httpd_req_t *req) {
+  wifi_mode_t mode;
+  if (esp_wifi_get_mode(&mode) != ESP_OK || (mode != WIFI_MODE_AP && mode != WIFI_MODE_APSTA)) {
+    // A blocking scan in STA mode can stall the HTTP task and drop the panel.
+    // Scanning is only offered in AP setup mode, where it is safe.
+    return reply(req, "409 Conflict", "err_scan_sta");
+  }
+  if (mode == WIFI_MODE_AP) {
+    // Scanning needs the STA interface; keep the AP alive for the panel.
+    esp_wifi_set_mode(WIFI_MODE_APSTA);
+  }
+  wifi_scan_config_t cfg = {0};
+  cfg.show_hidden = true;
+  if (esp_wifi_scan_start(&cfg, true) != ESP_OK) {
+    return reply(req, "503 Service Unavailable", "err_scan");
+  }
+  uint16_t num = 0;
+  esp_wifi_scan_get_ap_num(&num);
+  if (num > 24) num = 24;
+  wifi_ap_record_t *aps = calloc(num ? num : 1, sizeof(*aps));
+  char *json = malloc(4096);
+  if (!aps || !json) {
+    free(aps);
+    free(json);
+    return reply(req, "503 Service Unavailable", "err_no_mem");
+  }
+  esp_wifi_scan_get_ap_records(&num, aps);
+  int n = snprintf(json, 4096, "{\"networks\":[");
+  for (uint16_t i = 0; i < num && n > 0 && n < 3900; i++) {
+    char name[70];
+    json_escape((const char *)aps[i].ssid, name, sizeof(name));
+    n += snprintf(json + n, 4096 - (size_t)n, "%s{\"ssid\":\"%s\",\"rssi\":%d,\"auth\":%d}",
+                  i ? "," : "", name, aps[i].rssi, (int)aps[i].authmode);
+  }
+  if (n > 0 && n < 4090) n += snprintf(json + n, 4096 - (size_t)n, "]}");
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  httpd_resp_send(req, json, n);
+  free(aps);
+  free(json);
+  return ESP_OK;
+}
+
 static void start_http(void) {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.stack_size = 8192;
-  config.max_uri_handlers = 12;
+  config.max_uri_handlers = 20;
   config.lru_purge_enable = true;
   config.recv_wait_timeout = 15;
   httpd_handle_t server = NULL;
@@ -917,6 +1188,12 @@ static void start_http(void) {
       {.uri = "/api/wifi", .method = HTTP_POST, .handler = wifi_handler},
       {.uri = "/api/update", .method = HTTP_POST, .handler = update_handler},
       {.uri = "/api/reboot", .method = HTTP_POST, .handler = reboot_handler},
+      {.uri = "/api/scan", .method = HTTP_GET, .handler = scan_handler},
+      {.uri = "/api/job", .method = HTTP_POST, .handler = job_upload_handler},
+      {.uri = "/api/job/start", .method = HTTP_POST, .handler = job_start_handler},
+      {.uri = "/api/job/pause", .method = HTTP_POST, .handler = job_pause_handler},
+      {.uri = "/api/job/resume", .method = HTTP_POST, .handler = job_resume_handler},
+      {.uri = "/api/job/stop", .method = HTTP_POST, .handler = job_stop_handler},
   };
   for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) httpd_register_uri_handler(server, &uris[i]);
 }
@@ -1238,6 +1515,12 @@ void app_main(void) {
 
   g_usb_mutex = xSemaphoreCreateMutex();
   g_rx_stream = xStreamBufferCreate(RX_STREAM_SIZE, 1);
+  g_job_data = heap_caps_malloc(JOB_MAX_BYTES, MALLOC_CAP_SPIRAM);
+  if (g_job_data) {
+    log_msg("Job buffer: %u KiB in PSRAM", (unsigned)(JOB_MAX_BYTES / 1024));
+  } else {
+    log_msg("Job buffer: no PSRAM");
+  }
   load_config();
   nvs_handle_t boot_h;
   if (nvs_open("cfg", NVS_READWRITE, &boot_h) == ESP_OK) {
@@ -1252,9 +1535,9 @@ void app_main(void) {
   xTaskCreate(monitor_task, "monitor", 4096, NULL, 3, NULL);
   start_improv();
   start_wifi();
-  start_mdns();
   start_usb();
   start_http();
   xTaskCreate(health_task, "health", 4096, NULL, 2, NULL);
+  xTaskCreate(job_task, "job", 4096, NULL, 7, NULL);
   xTaskCreate(bridge_task, "bridge", 6144, NULL, 8, NULL);
 }

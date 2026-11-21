@@ -71,7 +71,7 @@ h2{display:flex;align-items:center;gap:10px;font-size:22px;margin:0 0 16px;color
 
 .grid{display:flex;flex-direction:column;gap:20px;margin-top:20px}
 .col{display:contents}
-#c_ctl{order:1}#c_con{order:2}#c_set{order:3}#c_wifi{order:4}#c_fw{order:5}
+#c_ctl{order:1}#c_con{order:2}#c_set{order:3}#c_wifi{order:4}#c_fw{order:5}#c_job{order:6}
 @media(min-width:1000px){
   .grid{display:grid;grid-template-columns:1fr 1fr;align-items:start}
   .col{display:flex;flex-direction:column;gap:20px;min-width:0}
@@ -136,6 +136,11 @@ select{appearance:none;-webkit-appearance:none;padding-right:44px;cursor:pointer
 .switch input:checked{background:var(--ok);border-color:var(--ok)}
 .switch input:checked::after{transform:translateX(26px)}
 form>button{margin-top:18px}
+.netrow{display:flex;gap:10px;align-items:stretch}
+.netrow select{flex:1;min-width:0}
+.netrow .refresh{flex:0 0 auto;padding:0 16px;min-height:52px}
+.netrow .refresh.spin .ic{animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 
 /* firmware */
 .file{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px;border-radius:12px;border:2px dashed #4a5868;
@@ -155,6 +160,11 @@ form>button{margin-top:18px}
   font-weight:700;font-size:16px;border:1px solid var(--line);background:rgba(0,0,0,.22);transition:color .2s,border-color .2s,transform .2s}
 .foot a:hover{color:#fff;border-color:#fff;transform:translateY(-1px)}
 .foot .ic{width:21px;height:21px}
+.jobopts{display:grid;grid-template-columns:1fr auto;gap:10px 12px;align-items:center;margin:12px 0 4px}
+.jobopts label{font-weight:700;color:#cfdae7}
+.jobopts .num{display:flex;align-items:center;gap:6px}
+.jobopts input{width:84px;margin:0;text-align:center}
+.jobopts .pc{font-weight:800;color:var(--acc)}
 #toasts{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:50;display:flex;flex-direction:column;gap:10px;
   width:min(560px,calc(100% - 32px));pointer-events:none}
 .toast{display:flex;align-items:center;gap:12px;padding:14px 18px;border-radius:14px;font-weight:800;color:#fff;
@@ -272,11 +282,37 @@ form>button{margin-top:18px}
         <h2><svg class="ic"><use href="#i-wifi"/></svg><span data-i="wifi"></span></h2>
         <form id="f_wifi">
           <label for="ssid" data-i="net"></label>
-          <input id="ssid" name="ssid" type="text" maxlength="32" required autocapitalize="none" autocomplete="off" spellcheck="false">
+          <div class="netrow">
+            <select id="ssid" name="ssid" required autocomplete="off"></select>
+            <button type="button" class="ghost refresh" id="scan_btn" onclick="scanWifi()" title="Scan networks" aria-label="Scan networks"><svg class="ic"><use href="#i-refresh"/></svg></button>
+          </div>
           <label for="pass" data-i="pass"></label>
           <input id="pass" name="pass" type="password" maxlength="63" autocomplete="new-password">
           <button type="submit"><svg class="ic"><use href="#i-save"/></svg><span data-i="wifi_save"></span></button>
         </form>
+      </section>
+      <section id="c_job" class="card ctl" style="--i:6">
+        <h2><svg class="ic"><use href="#i-file"/></svg><span data-i="job"></span></h2>
+        <div class="file" id="job_drop">
+          <label class="btn ghost"><input id="job_file" type="file" accept=".gcode,.nc,.txt"><svg class="ic"><use href="#i-file"/></svg><span data-i="choose_file"></span></label>
+          <span class="name" id="job_name"></span>
+        </div>
+        <div class="progress" id="job_prog"><i id="job_prog_i"></i></div>
+        <div class="jobopts">
+          <label for="job_power" data-i="job_power"></label>
+          <div class="num"><input id="job_power" type="number" min="10" max="150" step="5" value="100"><span class="pc">%</span></div>
+          <label for="job_speed" data-i="job_speed"></label>
+          <div class="num"><input id="job_speed" type="number" min="10" max="200" step="5" value="100"><span class="pc">%</span></div>
+        </div>
+        <div id="job_caps" class="hint"></div>
+        <div class="btns">
+          <button id="job_up" onclick="uploadJob()"><svg class="ic"><use href="#i-up"/></svg><span data-i="job_upload"></span></button>
+          <button class="ghost" id="job_start" onclick="jobAction('start')"><svg class="ic"><use href="#i-play"/></svg><span data-i="job_start"></span></button>
+          <button class="ghost" id="job_pause" onclick="jobAction('pause')"><svg class="ic"><use href="#i-pause"/></svg><span data-i="job_pause"></span></button>
+          <button class="ghost" id="job_resume" onclick="jobAction('resume')"><svg class="ic"><use href="#i-play"/></svg><span data-i="job_resume"></span></button>
+          <button class="ghost" id="job_stop" onclick="jobAction('stop')"><svg class="ic"><use href="#i-stop"/></svg><span data-i="job_stop"></span></button>
+        </div>
+        <div id="job_state" class="hint"></div>
       </section>
     </div>
   </div>
@@ -308,7 +344,7 @@ nousb:'Connect the machine to the native USB port of the bridge.',noconn:'No con
 saved:'Settings saved',confirm_wifi:'The bridge will restart and join the new network. Continue?',
 wifi_saved:'Saved. The bridge is restarting…',confirm_reboot:'Restart the bridge?',rebooting:'The bridge is restarting…',
 choose:'Choose a .bin firmware file first',uploading:'Uploading {p}%',updated:'Firmware updated. The bridge is restarting…',
-stopped:'STOP sent: GRBL reset',github:'Source code on GitHub',upd_avail:'Version {v} is available',upd_btn:'Install',check_upd:'Check for updates',upd_latest:'You have the latest version',upd_failed:'Could not check for updates',upd_confirm:'Download and install version {v}? The bridge will restart.',upd_downloading:'Downloading {p}%',upd_installing:'Installing update…',upd_done:'Update installed. The bridge is restarting…',upd_fail:'Update failed',
+stopped:'STOP sent: GRBL reset',github:'Source code on GitHub',upd_avail:'Version {v} is available',upd_btn:'Install',check_upd:'Check for updates',upd_latest:'You have the latest version',upd_failed:'Could not check for updates',upd_confirm:'Download and install version {v}? The bridge will restart.',upd_downloading:'Downloading {p}%',upd_installing:'Installing update…',upd_done:'Update installed. The bridge is restarting…',upd_fail:'Update failed',err_scan_sta:'Scan is available in AP setup mode',net_scan:'Scan networks',net_none:'No networks found',net_other:'Other network…',net_ask:'Wi-Fi name (SSID):',net_found:'Found {n} networks',net_scan_fail:'Wi-Fi scan failed',job:'Local job',job_power:'Power',job_speed:'Speed',job_caps:'File: S max {s} · F max {f}',job_upload:'Upload file',job_start:'Start',job_pause:'Pause',job_resume:'Resume',job_stop:'Stop',job_empty:'No G-code file loaded',job_loaded:'Loaded {n} · {p}',job_running:'Running {p}% · line {l} · power {pw}% · speed {sp}%',job_paused:'Paused {p}% · line {l}',job_done:'Last job finished',job_error:'Job stopped with an error',job_confirm_stop:'Stop the local job?',job_uploaded:'File uploaded',job_start_ok:'Job started',job_pause_ok:'Paused',job_resume_ok:'Resumed',job_stop_ok:'Job stopped',
 err_empty:'Empty command',err_no_usb:'Machine not connected',err_busy:'A connected program is controlling the machine',
 err_too_long:'Request too long',err_bad_settings:'Invalid baud rate or port',err_save:'Could not save',
 port_changed:'Port changed. The bridge is restarting…',err_bad_wifi:'Invalid network name or password (at least 8 characters)',
@@ -333,7 +369,7 @@ nousb:'Подключите станок к встроенному USB-порт�
 saved:'Настройки сохранены',confirm_wifi:'Мост перезагрузится и подключится к новой сети. Продолжить?',
 wifi_saved:'Сохранено. Мост перезагружается…',confirm_reboot:'Перезагрузить мост?',rebooting:'Мост перезагружается…',
 choose:'Сначала выберите файл прошивки .bin',uploading:'Загрузка {p}%',updated:'Прошивка обновлена. Мост перезагружается…',
-stopped:'СТОП отправлен: сброс GRBL',github:'Исходный код на GitHub',upd_avail:'Доступна версия {v}',upd_btn:'Установить',check_upd:'Проверить обновления',upd_latest:'У вас последняя версия',upd_failed:'Не удалось проверить обновления',upd_confirm:'Скачать и установить версию {v}? Мост перезагрузится.',upd_downloading:'Скачивание {p}%',upd_installing:'Установка обновления…',upd_done:'Обновление установлено. Мост перезагружается…',upd_fail:'Ошибка обновления',
+stopped:'СТОП отправлен: сброс GRBL',github:'Исходный код на GitHub',upd_avail:'Доступна версия {v}',upd_btn:'Установить',check_upd:'Проверить обновления',upd_latest:'У вас последняя версия',upd_failed:'Не удалось проверить обновления',upd_confirm:'Скачать и установить версию {v}? Мост перезагрузится.',upd_downloading:'Скачивание {p}%',upd_installing:'Установка обновления…',upd_done:'Обновление установлено. Мост перезагружается…',upd_fail:'Ошибка обновления',err_scan_sta:'Скан доступен в режиме AP при первичной настройке',net_scan:'Поиск сетей',net_none:'Сети не найдены',net_other:'Другая сеть…',net_ask:'Имя Wi-Fi сети (SSID):',net_found:'Найдено сетей: {n}',net_scan_fail:'Не удалось просканировать Wi-Fi',job:'Локальная задача',job_power:'Мощность',job_speed:'Скорость',job_caps:'Файл: S max {s} · F max {f}',job_upload:'Загрузить файл',job_start:'Старт',job_pause:'Пауза',job_resume:'Продолжить',job_stop:'Стоп',job_empty:'G-code не загружен',job_loaded:'Загружено {n} · {p}',job_running:'Выполняется {p}% · строка {l} · мощность {pw}% · скорость {sp}%',job_paused:'Пауза {p}% · строка {l}',job_done:'Последняя задача завершена',job_error:'Задача остановлена с ошибкой',job_confirm_stop:'Остановить локальную задачу?',job_uploaded:'Файл загружен',job_start_ok:'Задача запущена',job_pause_ok:'Пауза',job_resume_ok:'Продолжено',job_stop_ok:'Задача остановлена',
 err_empty:'Пустая команда',err_no_usb:'Станок не подключён',err_busy:'Станком управляет подключённая программа',
 err_too_long:'Слишком длинный запрос',err_bad_settings:'Неверная скорость или порт',err_save:'Не удалось сохранить',
 port_changed:'Порт изменён. Мост перезагружается…',err_bad_wifi:'Неверное имя сети или пароль (минимум 8 символов)',
@@ -384,7 +420,7 @@ function render(){
   $('b_ap').classList.toggle('show',!!st.ap);document.body.classList.toggle('ap',!!st.ap);$('ap_t').textContent=t('ap_banner',{ap:st.ap_ssid});
   let h='';
   h+=tile('wifi',t('k_wifi'),st.wifi?esc(st.ssid)+' · '+st.rssi+' '+t('dbm'):t('no_wifi'),st.wifi?'ok':'bad',true);
-  if(st.wifi)h+=tile('ip',t('k_addr'),esc(st.ip)+'<br>'+esc(st.host)+'.local','info');
+  if(st.wifi)h+=tile('ip',t('k_addr'),esc(st.ip),'info');
   h+=tile('usb',t('k_usb'),st.usb?t('usb_on')+'<br>'+st.vid+':'+st.pid+' · '+esc(st.driver)+' · '+st.baud+' '+t('baud_u'):t('usb_off'),st.usb?'ok':'bad',true);
   const alarm=st.state==='Alarm'||st.tripped;
   h+=tile('state',t('k_state'),esc(st.state),alarm?'bad':(st.state==='-'?'':'acc'),true);
@@ -404,6 +440,26 @@ function render(){
   $('stop').classList.toggle('armed',st.state==='Run'||st.state==='Jog');
   const hint=st.client?t('busy',{ip:st.client_ip}):(!st.usb?t('nousb'):(running?t('job'):''));
   $('busy').textContent=hint;$('busy').classList.toggle('show',!!hint);
+  const jstate=Number(st.job)||0, jsize=Number(st.job_size)||0, jpos=Number(st.job_pos)||0;
+  const jpct=jsize?Math.round(100*jpos/jsize):0;
+  const jpw=Number(st.job_power)||100, jsp=Number(st.job_speed)||100;
+  $('job_caps').textContent=jsize?t('job_caps',{s:st.job_max_s||0,f:st.job_max_f||0}):'';
+  const picked=$('job_file').files&&$('job_file').files[0];
+  $('job_name').textContent=jsize?st.job_name+' · '+fmt(jsize):(picked?picked.name+' · '+fmt(picked.size):t('job_empty'));
+  $('job_prog').classList.toggle('show',jstate===2||jstate===3);
+  $('job_prog_i').style.width=jpct+'%';
+  $('job_up').disabled=lock||jstate===2||jstate===3;
+  $('job_start').disabled=!st.usb||st.client||!(jstate===1||jstate===4);
+  $('job_pause').disabled=jstate!==2;
+  $('job_resume').disabled=jstate!==3;
+  $('job_stop').disabled=!(jstate===2||jstate===3);
+  let jt='';
+  if(jstate===2)jt=t('job_running',{p:jpct,l:st.job_lines||0,pw:jpw,sp:jsp});
+  else if(jstate===3)jt=t('job_paused',{p:jpct,l:st.job_lines||0});
+  else if(jstate===4)jt=t('job_error');
+  else if(jstate===0&&jsize)jt=t('job_done');
+  else if(jstate===1)jt=t('job_loaded',{n:st.job_name,p:fmt(jsize)});
+  $('job_state').textContent=jt;$('job_state').classList.toggle('show',!!jt);
   if(!filled){const f=$('f_set');f.baud.value=st.baud;f.port.value=st.port;f.safety.checked=st.safety;$('ssid').value=st.ssid||'';filled=true}
 }
 async function poll(){
@@ -521,7 +577,62 @@ async function installLatest() {
     upd.busy = false; $('upd_b').disabled = false; $('upd_b').textContent = t('upd_btn');
   }
 }
+function pickJob(f){$('job_name').textContent=f?f.name+' · '+fmt(f.size):t('job_empty')}
+$('job_file').onchange=()=>pickJob($('job_file').files[0]);
+function uploadJob(){
+  const f=$('job_file').files[0]; if(!f){toast(t('choose'),true);return}
+  const x=new XMLHttpRequest(); x.open('POST','/api/job?name='+encodeURIComponent(f.name));
+  const bar=$('job_prog'), fill=$('job_prog_i'), btn=$('job_up');
+  bar.classList.add('show'); fill.style.width='0'; btn.disabled=true;
+  x.upload.onprogress=e=>{if(e.lengthComputable)fill.style.width=Math.round(100*e.loaded/e.total)+'%'};
+  x.onloadend=()=>{btn.disabled=false;
+    if(x.status===200){toast(t('job_uploaded'));poll()}else{bar.classList.remove('show');toast(t((x.responseText||'').trim()||'err_net'),true)}};
+  x.send(f);
+}
+async function jobAction(a){
+  if(a==='stop'&&!confirm(t('job_confirm_stop')))return;
+  let url='/api/job/'+a;
+  if(a==='start'){
+    const p=Math.min(150,Math.max(10,Math.round(Number($('job_power').value)||100)));
+    const s=Math.min(200,Math.max(10,Math.round(Number($('job_speed').value)||100)));
+    $('job_power').value=p;$('job_speed').value=s;
+    url+='?power='+p+'&speed='+s;
+  }
+  const x=await post(url,'');
+  if(x)toast(t('job_'+a+'_ok'));
+  poll();
+}
+async function scanWifi(){
+  const sel=$('ssid'), btn=$('scan_btn');
+  const cur=st.ssid||sel.value;
+  btn.classList.add('spin'); btn.disabled=true;
+  try{
+    const r=await fetch('/api/scan',{cache:'no-store'});
+    if(!r.ok){const txt=(await r.text()).trim();toast(t(txt||'net_scan_fail'),true);throw new Error();}
+    const d=await r.json();
+    const nets=(d.networks||[]).slice().sort((a,b)=>b.rssi-a.rssi);
+    sel.innerHTML='';
+    const add=(ssid,label)=>{const o=document.createElement('option');o.value=ssid;o.textContent=label;sel.appendChild(o);return o};
+    if(nets.length===0){add('',t('net_none')).disabled=true;}
+    for(const n of nets){
+      if(!n.ssid) continue;
+      const o=add(n.ssid,n.ssid+(n.auth?'  🔒':'')+'  '+n.rssi+' dBm');
+      if(n.ssid===cur) o.selected=true;
+    }
+    if(cur && !nets.some(n=>n.ssid===cur)){const o=add(cur,cur);o.selected=true;sel.insertBefore(o,sel.firstChild);}
+    const other=add('__other__',t('net_other'));
+    sel.onchange=()=>{
+      if(sel.value!=='__other__') return;
+      const v=prompt(t('net_ask'),'');
+      if(v){const o=document.createElement('option');o.value=v;o.textContent=v;o.selected=true;sel.insertBefore(o,sel.firstChild);}
+      else{const first=sel.querySelector('option:not([value="__other__"])');if(first)first.selected=true;}
+    };
+    toast(t('net_found',{n:nets.filter(n=>n.ssid).length}));
+  }catch(e){toast(t('net_scan_fail'),true)}
+  finally{btn.classList.remove('spin');btn.disabled=false}
+}
 applyLang();poll();setInterval(poll,1000);setInterval(logPoll,1000);
+setTimeout(() => { if (st && st.ap) scanWifi(); }, 1500);
 setTimeout(() => checkUpdate(false), 4000);
 setInterval(() => checkUpdate(false), 6 * 3600 * 1000);
 </script>
