@@ -63,7 +63,8 @@ On some boards the LED only works after closing a solder jumper marked `RGB`.
 
 ## Safety notes
 
-- The emergency stop triggers when the TCP sender disconnects while GRBL reports `Run`, `Jog` or `Hold`, or G-code was sent during the last 10 s. Broken connections are detected by TCP keepalive in about 6 s. After the reset GRBL loses its position, so the job has to be restarted. The option can be turned off in the panel.
+- The emergency stop triggers when the TCP sender disconnects while GRBL reports `Run`, `Jog` or `Hold`, or a G-code line was sent during the last 10 s. Read-only queries such as `$I`, `$$` and `?` do not arm it, so checking the machine and disconnecting does not reset an idle machine. Broken connections are detected by TCP keepalive in about 6 s. After the reset GRBL loses its position, so the job has to be restarted. The option can be turned off in the panel.
+- The bridge never asserts DTR, so it does not reset the controller when it connects or reboots. Reset the machine from its own panel or sender when needed.
 - Wi-Fi is less reliable than a cable. For laser jobs prefer dynamic power (`M4`), which turns the beam off when motion stops, and never leave a running laser or CNC unattended.
 - The bridge refuses to restart, change Wi-Fi or change the TCP port or baud rate while GRBL reports `Run`, `Jog` or `Hold`, and refuses a firmware update while a sender is connected or G-code was sent during the last 10 s. Press STOP first: restarting the bridge mid-job would leave the machine running without a sender.
 - The web panel has no login: anyone on your local network can open it. Keep the bridge on a trusted network.
@@ -121,7 +122,7 @@ Errors are returned as short keys (`err_no_usb`, `err_busy`, ...) that the web p
 
 ## Project status
 
-Beta. Wi-Fi, the web panel, Improv provisioning, OTA updates and rollback are tested on hardware. The USB host side uses Espressif's official drivers; reports about specific machines and USB chips are welcome in [issues](https://github.com/f1devbin/grbl-wifi-bridge/issues).
+Beta. Wi-Fi, the web panel, Improv provisioning, OTA updates and rollback are tested on hardware. The USB host and TCP bridge were verified with a real CH340-based GRBL 1.0.2 controller (Elidor Z6): status polling, `$I` and the console work. Motion, laser jobs and the emergency stop during a running job still have to be tested on a machine. The USB host uses Espressif's official drivers; reports about specific machines and USB chips are welcome in [issues](https://github.com/f1devbin/grbl-wifi-bridge/issues).
 
 ## License
 

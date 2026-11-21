@@ -29,7 +29,7 @@
 #include "usb/vcp_cp210x.h"
 #include "usb/vcp_ftdi.h"
 
-#define FW_VERSION "1.5.1"
+#define FW_VERSION "1.6.0"
 #define FW_NAME "GRBL Wi-Fi Bridge"
 #define HOSTNAME "grbl-bridge"
 #define AP_SSID "GRBL-Bridge-setup"
@@ -294,8 +294,10 @@ static void open_usb_device(uint16_t vid, uint16_t pid) {
   g_cdc = hdl;
   xSemaphoreGive(g_usb_mutex);
   apply_line_coding();
-  // Most GRBL boards reset on DTR like on a PC connection; the welcome banner then appears in the console.
-  cdc_acm_host_set_control_line_state(hdl, true, false);
+  // Do not assert DTR: on boards that wire DTR straight to the reset pin it holds GRBL in reset.
+  // A bridge must also never reset the machine when it connects or reboots in the middle of a job.
+  const esp_err_t line_err = cdc_acm_host_set_control_line_state(hdl, false, false);
+  if (line_err != ESP_OK) log_msg("Control lines not released: %s", esp_err_to_name(line_err));
 
   g_usb_vid = vid;
   g_usb_pid = pid;
@@ -432,6 +434,30 @@ static void accept_client(int listen_fd) {
   log_msg("Client %s connected", g_client_ip);
 }
 
+// Arms the emergency stop only for real G-code. Read-only queries ($I, $$, ?) must not
+// arm it: otherwise closing a sender right after reading the state resets an idle machine.
+static void note_client_data(const uint8_t *buf, int n) {
+  int i = 0;
+  while (i < n) {
+    while (i < n && (buf[i] == ' ' || buf[i] == '\t' || buf[i] == '\r' || buf[i] == '\n' || buf[i] == '?' ||
+                     buf[i] == '!' || buf[i] == '~' || buf[i] == 0x18)) {
+      i++;
+    }
+    if (i >= n) return;
+    if (buf[i] == '$') {
+      // $J (jog) and $H (homing) move the machine; other $ commands are settings or queries.
+      if (i + 1 < n && (buf[i + 1] == 'J' || buf[i + 1] == 'j' || buf[i + 1] == 'H' || buf[i + 1] == 'h')) {
+        g_last_gcode_us = esp_timer_get_time();
+        return;
+      }
+      while (i < n && buf[i] != '\n') i++;
+      continue;
+    }
+    g_last_gcode_us = esp_timer_get_time();
+    return;
+  }
+}
+
 static void bridge_task(void *arg) {
   const int listen_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   const int on = 1;
@@ -474,12 +500,7 @@ static void bridge_task(void *arg) {
         warned_no_usb = true;
       } else {
         warned_no_usb = false;
-        for (int i = 0; i < n; i++) {
-          if (buf[i] != '?' && buf[i] != '\r' && buf[i] != '\n') {
-            g_last_gcode_us = esp_timer_get_time();
-            break;
-          }
-        }
+        note_client_data(buf, n);
         if (usb_write(buf, (size_t)n) == ESP_OK) {
           g_tx_bytes += n;
         } else {
