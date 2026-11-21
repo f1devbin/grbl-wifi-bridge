@@ -29,7 +29,7 @@
 #include "usb/vcp_cp210x.h"
 #include "usb/vcp_ftdi.h"
 
-#define FW_VERSION "1.5.0"
+#define FW_VERSION "1.5.1"
 #define FW_NAME "GRBL Wi-Fi Bridge"
 #define HOSTNAME "grbl-bridge"
 #define AP_SSID "GRBL-Bridge-setup"
@@ -787,7 +787,7 @@ static esp_err_t settings_handler(httpd_req_t *req) {
     return reply(req, "400 Bad Request", "err_bad_settings");
   }
   // A restart or a baud change in the middle of a job would leave the machine running unattended.
-  if (grbl_running()) return reply(req, "409 Conflict", "err_job_running");
+  if (grbl_running()) return reply(req, "409 Conflict", "err_run");
   if (g_client >= 0 && (cfg.baud != g_cfg.baud || cfg.port != g_cfg.port)) {
     return reply(req, "409 Conflict", "err_busy");
   }
@@ -811,7 +811,7 @@ static esp_err_t wifi_handler(httpd_req_t *req) {
   const bool ok = form_field(body, "ssid", ssid, sizeof(ssid)) && ssid[0] && form_field(body, "pass", pass, sizeof(pass));
   const size_t plen = strlen(pass);
   if (!ok || (plen > 0 && plen < 8)) return reply(req, "400 Bad Request", "err_bad_wifi");
-  if (grbl_running()) return reply(req, "409 Conflict", "err_job_running");
+  if (grbl_running()) return reply(req, "409 Conflict", "err_run");
   if (save_wifi(ssid, pass) != ESP_OK) return reply(req, "500 Internal Server Error", "err_save");
   log_msg("Wi-Fi settings changed to %s, restarting", ssid);
   g_restart = true;
@@ -859,7 +859,7 @@ static esp_err_t update_handler(httpd_req_t *req) {
 
 static esp_err_t reboot_handler(httpd_req_t *req) {
   if (deny_on_ap(req)) return ESP_OK;
-  if (grbl_running()) return reply(req, "409 Conflict", "err_job_running");
+  if (grbl_running()) return reply(req, "409 Conflict", "err_run");
   g_restart = true;
   return reply(req, "200 OK", "ok");
 }
