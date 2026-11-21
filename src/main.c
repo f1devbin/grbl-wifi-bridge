@@ -1,4 +1,6 @@
 // GRBL Wi-Fi Bridge: ESP32-S3 USB host <-> raw TCP (port 23) + web panel.
+#include <errno.h>
+#include <fcntl.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -11,6 +13,7 @@
 #include "esp_netif.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -29,7 +32,7 @@
 #include "usb/vcp_cp210x.h"
 #include "usb/vcp_ftdi.h"
 
-#define FW_VERSION "1.6.2"
+#define FW_VERSION "1.6.3"
 #define FW_NAME "GRBL Wi-Fi Bridge"
 #define HOSTNAME "grbl-bridge"
 #define AP_SSID "GRBL-Bridge-setup"
@@ -86,6 +89,7 @@ static char g_client_ip[16] = "-";
 static volatile uint32_t g_tx_bytes, g_rx_bytes;
 static volatile int64_t g_last_gcode_us = -STREAMING_WINDOW_US;
 static volatile int64_t g_last_poll_us;
+static volatile int64_t g_bridge_beat;
 static volatile bool g_safety_tripped;
 static volatile bool g_show_status_once;
 
@@ -478,6 +482,7 @@ static void bridge_task(void *arg) {
   static uint8_t buf[1024];
   bool warned_no_usb = false;
   while (true) {
+    g_bridge_beat = esp_timer_get_time();
     if (g_drop_client) {
       g_drop_client = false;
       close_client(g_wifi_ok ? "machine unplugged" : "Wi-Fi lost");
@@ -948,9 +953,16 @@ static void monitor_task(void *arg) {
 
   bool marked_valid = false;
   uint32_t tick = 0;
+  esp_task_wdt_add(NULL);
   while (true) {
     vTaskDelay(pdMS_TO_TICKS(50));
+    esp_task_wdt_reset();
     tick += 50;
+    if (g_bridge_beat && esp_timer_get_time() - g_bridge_beat > 15000000) {
+      log_msg("GRBL bridge task stalled, restarting");
+      vTaskDelay(pdMS_TO_TICKS(500));
+      esp_restart();
+    }
 
     if (g_restart) {
       vTaskDelay(pdMS_TO_TICKS(1000));
@@ -1160,28 +1172,48 @@ static void start_improv(void) {
 // The web panel and the TCP listener share lwIP and the HTTP server. If either gets
 // stuck (the bridge used to need a power cycle after some CH340 disconnects), this
 // task notices that the local status page stopped answering and restarts the bridge.
+static bool http_ping(void) {
+  const int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (fd < 0) return false;
+  const int flags = fcntl(fd, F_GETFL, 0);
+  fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+  struct sockaddr_in addr = {.sin_family = AF_INET, .sin_port = htons(80), .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+  bool ok = false;
+  int r = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
+  if (r < 0 && errno == EINPROGRESS) {
+    fd_set wfds;
+    FD_ZERO(&wfds);
+    FD_SET(fd, &wfds);
+    struct timeval tv = {.tv_sec = 3, .tv_usec = 0};
+    r = select(fd + 1, NULL, &wfds, NULL, &tv);
+    if (r > 0) {
+      int err = 0;
+      socklen_t len = sizeof(err);
+      getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len);
+      r = err == 0 ? 0 : -1;
+    }
+  }
+  if (r == 0) {
+    fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
+    const struct timeval tv = {.tv_sec = 3, .tv_usec = 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    static const char req[] = "GET /api/status HTTP/1.0\r\nHost: localhost\r\n\r\n";
+    if (send(fd, req, sizeof(req) - 1, 0) > 0) {
+      char reply[16];
+      const int n = recv(fd, reply, sizeof(reply) - 1, 0);
+      ok = n > 0 && strncmp(reply, "HTTP/1.", 7) == 0;
+    }
+  }
+  close(fd);
+  return ok;
+}
+
 static void health_task(void *arg) {
   vTaskDelay(pdMS_TO_TICKS(30000));
   int fails = 0;
   while (true) {
-    bool ok = false;
-    const int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (fd >= 0) {
-      const struct timeval tv = {.tv_sec = 3, .tv_usec = 0};
-      setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-      setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-      struct sockaddr_in addr = {.sin_family = AF_INET, .sin_port = htons(80), .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
-      if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
-        static const char req[] = "GET /api/status HTTP/1.0\r\nHost: localhost\r\n\r\n";
-        if (send(fd, req, sizeof(req) - 1, 0) > 0) {
-          char reply[16];
-          const int n = recv(fd, reply, sizeof(reply) - 1, 0);
-          ok = n > 0 && strncmp(reply, "HTTP/1.", 7) == 0;
-        }
-      }
-      close(fd);
-    }
-    if (ok) {
+    if (http_ping()) {
       fails = 0;
     } else if (++fails >= 3) {
       log_msg("Web panel stopped answering, restarting the bridge");

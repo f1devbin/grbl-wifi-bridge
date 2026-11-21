@@ -50,6 +50,8 @@ h1{font-size:24px;line-height:1.15;margin:0;font-weight:800;letter-spacing:.2px}
 .banner.show{display:flex}
 .banner.bad{background:rgba(255,90,90,.12);border-color:var(--bad)}
 .banner.violet{background:rgba(197,139,255,.12);border-color:var(--violet)}
+.banner.info{background:rgba(92,200,255,.12);border-color:var(--info)}
+.banner .sm{margin-left:auto;min-height:42px;font-size:16px;padding:8px 16px;flex:none}
 
 /* cards */
 .card{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
@@ -188,6 +190,7 @@ form>button{margin-top:18px}
   <symbol id="i-power" viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></symbol>
   <symbol id="i-save" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M23 4v6h-6M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></symbol>
   <symbol id="i-gh" viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></symbol>
 </svg>
 
@@ -205,6 +208,7 @@ form>button{margin-top:18px}
 <div class="wrap">
   <div id="b_off" class="banner bad"><svg class="ic"><use href="#i-wifi"/></svg><span data-i="noconn"></span></div>
   <div id="b_ap" class="banner violet"><svg class="ic"><use href="#i-wifi"/></svg><span id="ap_t"></span></div>
+  <div id="b_upd" class="banner info"><svg class="ic"><use href="#i-up"/></svg><span id="upd_t"></span><button class="ghost sm" id="upd_b" onclick="installLatest()"></button></div>
 
   <section class="card" style="--i:0">
     <h2><svg class="ic"><use href="#i-act"/></svg><span data-i="status"></span></h2>
@@ -242,6 +246,7 @@ form>button{margin-top:18px}
         <div class="btns">
           <button id="b_upd" onclick="update()"><svg class="ic"><use href="#i-up"/></svg><span data-i="upload"></span></button>
           <button class="ghost" id="b_rb" onclick="reboot()"><svg class="ic"><use href="#i-power"/></svg><span data-i="reboot"></span></button>
+          <button class="ghost" id="b_chk" onclick="checkUpdate(true)"><svg class="ic"><use href="#i-refresh"/></svg><span data-i="check_upd"></span></button>
         </div>
       </section>
     </div>
@@ -303,7 +308,7 @@ nousb:'Connect the machine to the native USB port of the bridge.',noconn:'No con
 saved:'Settings saved',confirm_wifi:'The bridge will restart and join the new network. Continue?',
 wifi_saved:'Saved. The bridge is restarting…',confirm_reboot:'Restart the bridge?',rebooting:'The bridge is restarting…',
 choose:'Choose a .bin firmware file first',uploading:'Uploading {p}%',updated:'Firmware updated. The bridge is restarting…',
-stopped:'STOP sent: GRBL reset',github:'Source code on GitHub',
+stopped:'STOP sent: GRBL reset',github:'Source code on GitHub',upd_avail:'Version {v} is available',upd_btn:'Install',check_upd:'Check for updates',upd_latest:'You have the latest version',upd_failed:'Could not check for updates',upd_confirm:'Download and install version {v}? The bridge will restart.',upd_downloading:'Downloading {p}%',upd_installing:'Installing update…',upd_done:'Update installed. The bridge is restarting…',upd_fail:'Update failed',
 err_empty:'Empty command',err_no_usb:'Machine not connected',err_busy:'A connected program is controlling the machine',
 err_too_long:'Request too long',err_bad_settings:'Invalid baud rate or port',err_save:'Could not save',
 port_changed:'Port changed. The bridge is restarting…',err_bad_wifi:'Invalid network name or password (at least 8 characters)',
@@ -328,7 +333,7 @@ nousb:'Подключите станок к встроенному USB-порт�
 saved:'Настройки сохранены',confirm_wifi:'Мост перезагрузится и подключится к новой сети. Продолжить?',
 wifi_saved:'Сохранено. Мост перезагружается…',confirm_reboot:'Перезагрузить мост?',rebooting:'Мост перезагружается…',
 choose:'Сначала выберите файл прошивки .bin',uploading:'Загрузка {p}%',updated:'Прошивка обновлена. Мост перезагружается…',
-stopped:'СТОП отправлен: сброс GRBL',github:'Исходный код на GitHub',
+stopped:'СТОП отправлен: сброс GRBL',github:'Исходный код на GitHub',upd_avail:'Доступна версия {v}',upd_btn:'Установить',check_upd:'Проверить обновления',upd_latest:'У вас последняя версия',upd_failed:'Не удалось проверить обновления',upd_confirm:'Скачать и установить версию {v}? Мост перезагрузится.',upd_downloading:'Скачивание {p}%',upd_installing:'Установка обновления…',upd_done:'Обновление установлено. Мост перезагружается…',upd_fail:'Ошибка обновления',
 err_empty:'Пустая команда',err_no_usb:'Станок не подключён',err_busy:'Станком управляет подключённая программа',
 err_too_long:'Слишком длинный запрос',err_bad_settings:'Неверная скорость или порт',err_save:'Не удалось сохранить',
 port_changed:'Порт изменён. Мост перезагружается…',err_bad_wifi:'Неверное имя сети или пароль (минимум 8 символов)',
@@ -451,7 +456,74 @@ function update(){
     if(x.status===200){fill.style.width='100%';toast(t('updated'))}else{bar.classList.remove('show');toast(t((x.responseText||'').trim()||'err_net'),true)}};
   x.open('POST','/api/update');x.send(f);
 }
+let upd = null;
+const cmpv = (a, b) => {
+  const A = String(a).split('.').map(Number), B = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(A.length, B.length); i++) {
+    const x = A[i] || 0, y = B[i] || 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
+};
+async function checkUpdate(force) {
+  if (!online || !st || st.ap || !st.wifi) { if (force) toast(t('upd_failed'), true); return; }
+  let last = 0;
+  try { last = +localStorage.getItem('upd_at') || 0; } catch (e) {}
+  if (!force && Date.now() - last < 6 * 3600 * 1000) return;
+  try {
+    const r = await fetch('https://api.github.com/repos/f1devbin/grbl-wifi-bridge/releases/latest', { cache: 'no-store' });
+    if (!r.ok) throw 0;
+    const j = await r.json();
+    const tag = String(j.tag_name || '').replace(/^v/, '');
+    if (!tag) throw 0;
+    try { localStorage.setItem('upd_at', String(Date.now())); } catch (e) {}
+    if (cmpv(tag, st.version) > 0) {
+      upd = { ver: tag, url: `https://f1devbin.github.io/grbl-wifi-bridge/firmware/grbl-wifi-bridge-esp32s3-v${tag}-ota.bin`, busy: false };
+      $('upd_t').textContent = t('upd_avail', { v: tag });
+      $('upd_b').textContent = t('upd_btn');
+      $('b_upd').classList.add('show');
+    } else {
+      upd = null;
+      $('b_upd').classList.remove('show');
+      if (force) toast(t('upd_latest'));
+    }
+  } catch (e) { if (force) toast(t('upd_failed'), true); }
+}
+function downloadOta(url) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest();
+    x.open('GET', url);
+    x.responseType = 'arraybuffer';
+    x.onprogress = e => { if (e.lengthComputable) $('upd_b').textContent = t('upd_downloading', { p: Math.round(e.loaded * 100 / e.total) }); };
+    x.onload = () => x.status === 200 ? res(x.response) : rej(x.status);
+    x.onerror = () => rej(0);
+    x.send();
+  });
+}
+async function installLatest() {
+  if (!upd || upd.busy) return;
+  if (st && (st.client || st.state === 'Run' || st.state === 'Jog' || String(st.state).startsWith('Hold'))) { toast(t('err_job_running'), true); return; }
+  if (!confirm(t('upd_confirm', { v: upd.ver }))) return;
+  upd.busy = true; $('upd_b').disabled = true; $('upd_b').textContent = t('upd_installing');
+  try {
+    const data = await downloadOta(upd.url);
+    await new Promise((res, rej) => {
+      const x = new XMLHttpRequest();
+      x.open('POST', '/api/update');
+      x.onload = () => x.status === 200 ? res() : rej(x.responseText);
+      x.onerror = () => rej('err_net');
+      x.send(data);
+    });
+    toast(t('upd_done'));
+    setTimeout(() => location.reload(), 8000);
+  } catch (e) {
+    toast(t('upd_fail'), true);
+    upd.busy = false; $('upd_b').disabled = false; $('upd_b').textContent = t('upd_btn');
+  }
+}
 applyLang();poll();setInterval(poll,1000);setInterval(logPoll,1000);
+setTimeout(() => checkUpdate(false), 4000);
+setInterval(() => checkUpdate(false), 6 * 3600 * 1000);
 </script>
 </body>
 </html>
